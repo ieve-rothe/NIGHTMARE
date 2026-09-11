@@ -12,6 +12,7 @@ module Nightmare::Tools
     getter session_prefix : Set(String)
     getter persistent_exact : Set(String)
     getter persistent_prefix : Set(String)
+    getter persistent_patterns : Array(Regex)
 
     # Characters that bar auto-approval and force interactive confirmation (R3 / §4.2)
     METACHARACTERS = [';', '&', '|', '`', '$', '>', '<', '\n', '(', ')', '{', '}', '\\', '*']
@@ -21,6 +22,7 @@ module Nightmare::Tools
       @session_prefix = Set(String).new
       @persistent_exact = Set(String).new
       @persistent_prefix = Set(String).new
+      @persistent_patterns = [] of Regex
 
       load_persistent
     end
@@ -118,6 +120,7 @@ module Nightmare::Tools
 
       exact_key = argv.join(" ")
       return true if @session_exact.includes?(exact_key) || @persistent_exact.includes?(exact_key)
+      return true if @persistent_patterns.any? { |re| exact_key =~ re }
 
       binary = File.basename(argv[0])
       prefix_key = if argv.size > 1 && !argv[1].starts_with?('-')
@@ -142,6 +145,13 @@ module Nightmare::Tools
     # Records an exact command approval for the active session
     def allow_session_exact(argv : Array(String)) : Nil
       @session_exact.add(argv.join(" "))
+    end
+
+    # Persists an exact command to $XDG_CONFIG_HOME/.../allow
+    def allow_persist_exact(argv : Array(String)) : Nil
+      return if argv.empty?
+      @persistent_exact.add(argv.join(" "))
+      save_persistent
     end
 
     # Records a prefix approval (argv[0] + argv[1]) for the active session
@@ -178,6 +188,12 @@ module Nightmare::Tools
         next if trimmed.empty? || trimmed.starts_with?('#')
         if trimmed.starts_with?("prefix:")
           @persistent_prefix.add(trimmed[7..].strip)
+        elsif trimmed.starts_with?('^') || trimmed.ends_with?('$') || trimmed.includes?(".*")
+          begin
+            @persistent_patterns << Regex.new(trimmed)
+          rescue
+            @persistent_exact.add(trimmed)
+          end
         else
           @persistent_exact.add(trimmed)
         end

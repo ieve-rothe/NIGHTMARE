@@ -20,7 +20,11 @@ module Nightmare::Harness
   record StepError,
     kind : StepErrorKind,
     message : String,
-    retryable : Bool = false
+    retryable : Bool = false do
+    def cancelled? : Bool
+      kind.cancelled?
+    end
+  end
 
   class StepOutcome(T)
     getter value : T?

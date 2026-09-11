@@ -202,9 +202,9 @@ describe "Nightmare Tools Suite & Security Boundaries" do
         shell = Nightmare::Tools::Shell.new(guard, allowlist)
 
         # Timeout after 1 second for a 10s sleep
-        start_time = Time.monotonic
+        start_time = Time.instant
         result = shell.run_command("sleep 10", timeout_seconds: 1)
-        elapsed = Time.monotonic - start_time
+        elapsed = Time.instant - start_time
 
         result.should contain("[Execution timed out after 1 seconds]")
         elapsed.total_seconds.should be < 5.0

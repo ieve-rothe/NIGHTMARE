@@ -23,6 +23,18 @@ module Nightmare::Workspace
     getter repo_prompt_path : String
     getter manifest : Manifest
 
+    def workspace_config_dir : String
+      @config_dir
+    end
+
+    def workspace_state_dir : String
+      @state_dir
+    end
+
+    def workspace_cache_dir : String
+      @cache_dir
+    end
+
     def initialize(
       root_path : String = Dir.current,
       xdg_config_home : String? = nil,

@@ -466,7 +466,9 @@ module Nightmare::E2E
       error: Process::Redirect::Pipe
     )
 
-    ProcessSession.new(proc)
+    session = ProcessSession.new(proc)
+    session.wait_for("> ", timeout: 500.milliseconds) rescue nil
+    session
   end
 
   def self.binary_ready? : Bool

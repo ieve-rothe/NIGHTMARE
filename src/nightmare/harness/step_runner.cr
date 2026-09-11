@@ -70,6 +70,7 @@ module Nightmare::Harness
 
       wrapped_tools = wrap_tools_with_loop_detector(@tools, @tool_loop.loop_detector)
       overflow_retries_remaining = Config::CONTEXT_OVERFLOW_RETRIES
+      format_retries_remaining = Config::FORMAT_RETRIES
 
       wrapped_stream = ->(chunk : String) {
         if @tool_loop.cancelled?
@@ -104,6 +105,17 @@ module Nightmare::Harness
                 result.thinking,
                 result.iterations
               )
+            end
+          end
+
+          # Check if step error is MalformedOutput -> single format correction turn
+          if result.err? && result.error == Mantle::StepError::MalformedOutput
+            if format_retries_remaining > 0
+              format_retries_remaining -= 1
+              if active = @tool_loop.store.active_turn
+                active.messages << Mantle::Message.new("user", "The previous response had malformed output or arguments. Please reformat and proceed.")
+              end
+              next # retry turn with format correction
             end
           end
 
@@ -147,9 +159,28 @@ module Nightmare::Harness
             active.append_assistant(Mantle::Message.new("assistant", text))
           end
 
-          # Record remaining assistant/tool messages in transcript
+          # Record remaining assistant/tool messages in transcript before in-turn shedding
           if tr = @transcript
             active.messages[1..].each { |m| tr.record(m) }
+          end
+
+          # Check if turn exceeded shed trigger threshold:
+          hardmax = @tool_loop.store.hardmax
+          trigger_threshold = (hardmax.to_f * Config::SHED_TRIGGER_RATIO).to_i
+          total_chars = active.messages.sum { |m| (m.content || "").size }
+          estimated = if pt = @tool_loop.last_prompt_tokens
+            pt + @tool_loop.calibrator.estimate(total_chars)
+          else
+            @tool_loop.calibrator.estimate(total_chars)
+          end
+
+          if estimated > trigger_threshold
+            Context::Shedder.shed_active_turn!(
+              active,
+              current_tokens: estimated,
+              hardmax: hardmax,
+              calibrator: @tool_loop.calibrator
+            )
           end
 
           @tool_loop.store.commit_turn
@@ -235,9 +266,26 @@ module Nightmare::Harness
           args_json = args.to_json
           refused, msg = detector.check(tool_name, args_json)
           if refused
+            puts msg.not_nil!
+            STDOUT.flush
             msg.not_nil!
           elsif orig_handler
-            orig_handler.call(args)
+            begin
+              res = orig_handler.call(args)
+              puts res
+              STDOUT.flush
+              res
+            rescue ex : SecurityError
+              err = "[SecurityError: #{ex.message}]"
+              puts err
+              STDOUT.flush
+              err
+            rescue ex
+              err = "[Tool error: #{ex.message}]"
+              puts err
+              STDOUT.flush
+              err
+            end
           else
             {error: "No handler for #{tool_name}"}.to_json
           end

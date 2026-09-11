@@ -25,6 +25,7 @@ require "./nightmare/context/pinned_files"
 require "./nightmare/context/shedder"
 require "./nightmare/context/sliding_store"
 require "./nightmare/transcript"
+require "./nightmare/repl"
 
 module Nightmare
   VERSION = "0.1.0"
@@ -86,7 +87,7 @@ module Nightmare
       def self.help_text : String
         String.build do |io|
           opts = OptionParser.new do |p|
-            p.banner = "Usage: nightmare [options] [workspace_path]"
+            p.banner = "NIGHTMARE - Developer REPL\nUsage: nightmare [options] [workspace_path]"
             p.on("-s PATH", "--system=PATH", "Path to custom system prompt file") { }
             p.on("--no-log", "Disable LLM audit call logging") { }
             p.on("-m MODEL", "--model=MODEL", "Select model provider or alias") { }
@@ -119,23 +120,20 @@ module Nightmare
 
       begin
         env = Workspace::Environment.resolve(options.target_dir)
-        puts env.startup_banner
+        repl = REPL.new(
+          env: env,
+          system_prompt_path: options.system_prompt_path,
+          model_override: options.model,
+          no_log: options.no_log
+        )
+        repl.start
       rescue ex : SecurityError
         STDERR.puts "Fatal Security Violation: #{ex.message}"
         exit 1
       rescue ex : Exception
-        STDERR.puts "Fatal Initialization Error: #{ex.message}"
+        STDERR.puts "Fatal Error: #{ex.message}"
         exit 1
       end
-
-      begin
-        directive_buffer = Directives::Resolver.resolve_manager(env, options.system_prompt_path)
-      rescue ex : ArgumentError
-        STDERR.puts "Directive Error: #{ex.message}"
-        exit 1
-      end
-
-      # REPL interactive loop will be wired up in downstream milestones
     end
   end
 end

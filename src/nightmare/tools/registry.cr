@@ -24,9 +24,10 @@ module Nightmare::Tools
       client : Mantle::Clients::Client,
       @allowlist : Allowlist = Allowlist.new,
       diff_approval : Proc(String, String, Bool)? = nil,
-      shell_approval : Proc(String, Array(String), Bool, Tuple(ApprovalOutcome, String?))? = nil
+      shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))? = nil,
+      pinned_files : Context::PinnedFiles? = nil
     )
-      @read_only = ReadOnly.new(@guard)
+      @read_only = ReadOnly.new(@guard, pinned_files)
       @mutation = Mutation.new(@guard, diff_approval)
       @shell = Shell.new(@guard, @allowlist, shell_approval)
       @delegation = Delegation.new(client)
@@ -61,7 +62,7 @@ module Nightmare::Tools
       func = Mantle::Tools::FunctionDefinition.new("list_files", "Lists files in workspace with glob filtering, excluding git and sensitive files.", schema)
 
       Mantle::Tools::Tool.new(func) do |args|
-        path = args["path"]?.try(&.as_s?)
+        path = args["path"]?.try(&.as_s?) || args["directory"]?.try(&.as_s?)
         glob = args["glob"]?.try(&.as_s?)
         @read_only.list_files(path, glob)
       end
@@ -77,8 +78,8 @@ module Nightmare::Tools
       func = Mantle::Tools::FunctionDefinition.new("search", "Searches file contents across workspace for a regex pattern.", schema)
 
       Mantle::Tools::Tool.new(func) do |args|
-        pattern = args["pattern"]?.try(&.as_s) || ""
-        path = args["path"]?.try(&.as_s?)
+        pattern = args["pattern"]?.try(&.as_s?) || args["query"]?.try(&.as_s?) || ""
+        path = args["path"]?.try(&.as_s?) || args["directory"]?.try(&.as_s?)
         glob = args["glob"]?.try(&.as_s?)
         @read_only.search(pattern, path, glob)
       end
@@ -94,9 +95,11 @@ module Nightmare::Tools
       func = Mantle::Tools::FunctionDefinition.new("read_file", "Reads file contents safely with optional line offset and limit.", schema)
 
       Mantle::Tools::Tool.new(func) do |args|
-        path = args["path"]?.try(&.as_s) || ""
-        offset = args["offset"]?.try(&.as_i?)
-        limit = args["limit"]?.try(&.as_i?)
+        path = args["path"]?.try(&.as_s?) || args["filepath"]?.try(&.as_s?) || ""
+        raw_offset = args["offset"]?
+        offset = raw_offset.try(&.as_i?) || raw_offset.try(&.as_s?.try(&.to_i?))
+        raw_limit = args["limit"]?
+        limit = raw_limit.try(&.as_i?) || raw_limit.try(&.as_s?.try(&.to_i?))
         @read_only.read_file(path, offset, limit)
       end
     end
@@ -171,7 +174,8 @@ module Nightmare::Tools
 
       Mantle::Tools::Tool.new(func) do |args|
         cmd = args["command"]?.try(&.as_s) || ""
-        timeout = args["timeout_seconds"]?.try(&.as_i?)
+        raw_to = args["timeout"]? || args["timeout_seconds"]?
+        timeout = raw_to.try(&.as_i?) || raw_to.try(&.as_s?.try(&.to_i?))
         @shell.run_command(cmd, timeout)
       end
     end

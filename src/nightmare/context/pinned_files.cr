@@ -76,8 +76,13 @@ module Nightmare::Context
 
     def remove(path : String) : Bool
       prev_size = @files.size
-      @files.reject! { |f| f.path == path }
+      @files.reject! { |f| f.path == path || f.path.lchop("./") == path.lchop("./") }
       @files.size < prev_size
+    end
+
+    def pinned?(path : String) : Bool
+      norm = path.lchop("./")
+      @files.any? { |f| f.path == path || f.path.lchop("./") == norm }
     end
 
     def clear : Nil

@@ -11,8 +11,9 @@ require "./guard"
 module Nightmare::Tools
   class ReadOnly
     getter guard : Guard
+    property pinned_files : Context::PinnedFiles?
 
-    def initialize(@guard : Guard)
+    def initialize(@guard : Guard, @pinned_files : Context::PinnedFiles? = nil)
     end
 
     # Lists files in the workspace with glob filtering, excluding git/nightmare/sensitive files
@@ -99,6 +100,11 @@ module Nightmare::Tools
     # Reads file contents with optional 1-based line offset and limit
     def read_file(path : String, offset : Int32? = nil, limit : Int32? = nil) : String
       full_path = @guard.resolve_read(path)
+      rel_path = Path.new(full_path).relative_to(@guard.root).to_s
+
+      if @pinned_files.try &.pinned?(rel_path)
+        return "[File is already pinned in context: #{rel_path}]"
+      end
 
       unless File.exists?(full_path)
         return {error: "File not found: #{path}"}.to_json
