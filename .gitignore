@@ -1,0 +1,6 @@
+/docs/*
+!/docs/*.md
+/lib/
+/bin/
+/.shards/
+*.dwarf

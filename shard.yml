@@ -1,0 +1,13 @@
+name: nightmare
+version: 0.1.0
+
+authors:
+  - ieve <ievemail@proton.me>
+
+targets:
+  nightmare:
+    main: src/nightmare.cr
+
+crystal: '>= 1.21.0'
+
+license: MIT
