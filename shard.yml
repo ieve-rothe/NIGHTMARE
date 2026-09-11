@@ -4,6 +4,14 @@ version: 0.1.0
 authors:
   - ieve <ievemail@proton.me>
 
+dependencies:
+  mantle:
+    path: ../mantle
+  salamander:
+    path: ../salamander
+  tts_kokoro:
+    path: ../tts_kokoro
+
 targets:
   nightmare:
     main: src/nightmare.cr

@@ -1,9 +1,13 @@
 require "./spec_helper"
 
 describe Nightmare do
-  # TODO: Write tests
+  it "defines VERSION" do
+    Nightmare::VERSION.should eq("0.1.0")
+  end
 
-  it "works" do
-    false.should eq(true)
+  it "defines SecurityError exception type" do
+    ex = Nightmare::SecurityError.new("Test violation")
+    ex.should be_a(Exception)
+    ex.message.should eq("Test violation")
   end
 end
