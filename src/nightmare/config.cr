@@ -1,0 +1,28 @@
+# nightmare/config.cr
+# Copyright (C) 2026 Cam Carroll
+# Licensed under the AGPL-3.0. See LICENSE for details.
+
+module Nightmare
+  module Config
+    TOKEN_HARDMAX = 12_000
+    SHED_TRIGGER_RATIO = 0.85
+    PINNED_BUDGET_RATIO = 0.60
+    TURN_SOFT_CAP = 10
+    SHED_KEEP_CHARS = 200
+    SHED_KEEP_VERBATIM = 2
+    INITIAL_DIVISOR = 3.5
+    DIVISOR_ALPHA = 0.2
+    DIVISOR_CLAMP_MIN = 1.0
+    DIVISOR_CLAMP_MAX = 10.0
+    MAX_ITERATIONS = 15
+    RATE_LIMIT_RETRIES = 3
+    FORMAT_RETRIES = 1
+    CONTEXT_OVERFLOW_RETRIES = 1
+    LOOP_DETECT_THRESHOLD = 3
+    TURN_SPEND_CAP_TOKENS = 200_000
+    DEFAULT_COMMAND_TIMEOUT = 60.seconds
+    MAX_COMMAND_TIMEOUT = 600.seconds
+    PROCESS_GRACE_PERIOD = 2.seconds
+    TOOL_OUTPUT_MAX_BYTES = 65_536
+  end
+end

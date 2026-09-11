@@ -38,3 +38,41 @@ def with_env(vars : Hash(String, String?), &)
     end
   end
 end
+
+# In-process fake client for deterministic testing of inference and step loops (ARCHITECTURE_R3 §9)
+class FakeClient < Mantle::Clients::Client
+  property responses : Array(Mantle::Clients::Response)
+  property call_count : Int32 = 0
+  property recorded_messages : Array(Array(Mantle::Message)) = [] of Array(Mantle::Message)
+  property raise_on_call : Hash(Int32, Exception) = Hash(Int32, Exception).new
+
+  def initialize(@responses : Array(Mantle::Clients::Response) = [] of Mantle::Clients::Response)
+  end
+
+  def execute(
+    messages : Array(Mantle::Message),
+    tools : Array(Mantle::Tools::Tool)? = nil,
+    &on_chunk : String -> Nil
+  ) : Mantle::Clients::Response
+    @recorded_messages << messages.dup
+    @call_count += 1
+
+    if ex = @raise_on_call[@call_count]?
+      raise ex
+    end
+
+    response = if @responses.empty?
+      Mantle::Clients::Response.new(content: "default response", tool_calls: nil)
+    elsif @call_count <= @responses.size
+      @responses[@call_count - 1]
+    else
+      @responses.last
+    end
+
+    if content = response.content
+      on_chunk.call(content) unless content.empty?
+    end
+
+    response
+  end
+end
