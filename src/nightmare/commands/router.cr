@@ -20,6 +20,7 @@ module Nightmare::Commands
     property current_prompt : String
     property current_model : String
     property last_thinking : String? = nil
+    property on_model_change : Proc(String, Nil)? = nil
 
     def initialize(
       @store : Context::SlidingStore,
@@ -29,7 +30,8 @@ module Nightmare::Commands
       @env : Workspace::Environment,
       @transcript : Transcript,
       @current_prompt : String,
-      @current_model : String
+      @current_model : String,
+      @on_model_change : Proc(String, Nil)? = nil
     )
     end
 
@@ -246,6 +248,7 @@ HELP
         puts "Active model: #{@current_model}"
       else
         @current_model = name
+        @on_model_change.try &.call(name)
         puts "Model set to: #{@current_model}"
       end
     end

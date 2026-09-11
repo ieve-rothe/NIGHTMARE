@@ -195,9 +195,14 @@ module Nightmare::Harness
       else
         error_kind = map_step_error(result.error.not_nil!)
         retryable = error_kind.rate_limited?
+        msg = if em = result.error_message
+          "Mantle step error: #{result.error} - #{em}"
+        else
+          "Mantle step error: #{result.error}"
+        end
 
         TurnOutcome.failure(
-          error: StepError.new(error_kind, "Mantle step error: #{result.error}", retryable: retryable),
+          error: StepError.new(error_kind, msg, retryable: retryable),
           thinking: result.thinking,
           iterations: result.iterations,
           prompt_tokens: result.raw_response.try(&.prompt_eval_count)

@@ -180,6 +180,58 @@ module Nightmare::Workspace
       path == @root || path.starts_with?(prefix)
     end
 
+    def resolve_model(cli_override : String? = nil) : String
+      return cli_override if cli_override && !cli_override.empty?
+
+      # 1. Workspace config: ~/.config/nightmare/workspaces/<id>/config.json
+      ws_cfg = File.join(@config_dir, "config.json")
+      if File.exists?(ws_cfg)
+        if m = read_json_key(ws_cfg, "model")
+          return m
+        end
+      end
+
+      # 2. Global config: ~/.config/nightmare/config.json
+      global_cfg = File.join(@global_config_dir, "config.json")
+      if File.exists?(global_cfg)
+        if m = read_json_key(global_cfg, "model")
+          return m
+        end
+      end
+
+      Config::DEFAULT_MODEL
+    end
+
+    def resolve_api_url : String
+      if env_url = ENV["MANTLE_API_URL"]? || ENV["OLLAMA_API_URL"]?
+        return env_url unless env_url.empty?
+      end
+
+      ws_cfg = File.join(@config_dir, "config.json")
+      if File.exists?(ws_cfg)
+        if u = read_json_key(ws_cfg, "api_url")
+          return u
+        end
+      end
+
+      global_cfg = File.join(@global_config_dir, "config.json")
+      if File.exists?(global_cfg)
+        if u = read_json_key(global_cfg, "api_url")
+          return u
+        end
+      end
+
+      "http://127.0.0.1:11434/api/chat"
+    end
+
+    private def read_json_key(path : String, key : String) : String?
+      content = File.read(path)
+      parsed = JSON.parse(content)
+      parsed[key]?.try(&.as_s?)
+    rescue
+      nil
+    end
+
     private def resolve_xdg(env_var : String, param : String?, fallback : String) : String
       if param && !param.empty?
         param

@@ -51,7 +51,7 @@ module Nightmare
     )
       # 1. Directives resolution
       directive = Directives::Resolver.resolve(@env, system_prompt_path)
-      @model_name = model_override || Config::DEFAULT_MODEL
+      @model_name = @env.resolve_model(model_override)
 
       # 2. Persisted calibrator
       @calibrator = Context::TokenEstimator.load_or_create(@env.workspace_cache_dir)
@@ -70,7 +70,7 @@ module Nightmare
       @approval = UI::Approval.new(@env.root)
 
       # 6. Mantle LLM client
-      api_url = ENV["MANTLE_API_URL"]? || ENV["OLLAMA_API_URL"]? || "http://127.0.0.1:11434/api/chat"
+      api_url = @env.resolve_api_url
       model_config = Mantle::Clients::ModelConfig.new(
         model_name: @model_name,
         stream: true,
@@ -104,6 +104,10 @@ module Nightmare
       # 9. UI & Commands
       @stream_ctrl = UI::StreamController.new
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
+      on_model = ->(new_model : String) {
+        @model_name = new_model
+        client.model_name = new_model
+      }
       @router = Commands::Router.new(
         store: @store,
         pinned_files: @pinned_files,
@@ -112,7 +116,8 @@ module Nightmare
         env: @env,
         transcript: @transcript,
         current_prompt: directive,
-        current_model: @model_name
+        current_model: @model_name,
+        on_model_change: on_model
       )
     end
 
@@ -208,6 +213,7 @@ module Nightmare
         write_audit_log(active_input, val, elapsed.total_milliseconds.to_i) unless @no_log
       else
         err = outcome.error.not_nil!
+        write_audit_log(active_input, "", elapsed.total_milliseconds.to_i, error: err.message) unless @no_log
         if err.cancelled?
           @interrupted_effects = side_effects.dup
           puts "\n[Turn cancelled by user interrupt]"
@@ -221,7 +227,7 @@ module Nightmare
       @cancellation.busy = false
     end
 
-    private def write_audit_log(prompt : String, completion : String, latency_ms : Int32) : Nil
+    private def write_audit_log(prompt : String, completion : String, latency_ms : Int32, error : String? = nil) : Nil
       state_dir = @env.workspace_state_dir
       Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
       log_file = File.join(state_dir, "llm_calls.jsonl")
@@ -234,7 +240,8 @@ module Nightmare
         model: @router.current_model,
         prompt: prompt,
         completion: completion,
-        latency_ms: latency_ms
+        latency_ms: latency_ms,
+        error: error
       }
 
       File.open(log_file, "a") do |f|
