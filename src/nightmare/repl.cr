@@ -3,6 +3,7 @@
 # Licensed under the AGPL-3.0. See LICENSE for details.
 
 require "json"
+require "uuid"
 require "mantle"
 require "./config"
 require "./workspace/environment"
@@ -79,7 +80,12 @@ module Nightmare
         max_tokens: 4096,
         api_url: api_url
       )
-      client = Mantle::Clients::OllamaClient.new(model_config)
+      raw_client = Mantle::Clients::OllamaClient.new(model_config)
+      client : Mantle::Clients::Client = if @no_log
+        raw_client
+      else
+        Mantle::Clients::LoggingClient.new(raw_client, @env.log_path)
+      end
 
       # 7. Registry with approval hooks
       diff_cb = ->(diff : String, desc : String) { @approval.approve_diff(diff, desc) }
@@ -178,11 +184,14 @@ module Nightmare
       pinned_block = @pinned_files.render_pinned_block(@guard)
       start_time = Time.instant
 
-      outcome = @step_runner.run_turn(
-        directive: @router.current_prompt,
-        pinned_block: pinned_block
-      ) do |chunk|
-        @stream_ctrl.process_chunk(chunk)
+      turn_sequence_id = UUID.random.to_s
+      outcome = Mantle::LogContext.with_sequence_id(turn_sequence_id) do
+        @step_runner.run_turn(
+          directive: @router.current_prompt,
+          pinned_block: pinned_block
+        ) do |chunk|
+          @stream_ctrl.process_chunk(chunk)
+        end
       end
 
       elapsed = Time.instant - start_time
@@ -208,12 +217,8 @@ module Nightmare
           @calibrator.calibrate!(total_chars, prompt_tok)
           @calibrator.save(@env.workspace_cache_dir)
         end
-
-        # Write audit log if not disabled
-        write_audit_log(active_input, val, elapsed.total_milliseconds.to_i) unless @no_log
       else
         err = outcome.error.not_nil!
-        write_audit_log(active_input, "", elapsed.total_milliseconds.to_i, error: err.message) unless @no_log
         if err.cancelled?
           @interrupted_effects = side_effects.dup
           puts "\n[Turn cancelled by user interrupt]"
@@ -223,46 +228,9 @@ module Nightmare
         STDOUT.flush
       end
     ensure
+      Mantle::Clients::LoggingClient.flush
       @registry.set_active_side_effects(nil)
       @cancellation.busy = false
-    end
-
-    private def write_audit_log(prompt : String, completion : String, latency_ms : Int32, error : String? = nil) : Nil
-      state_dir = @env.workspace_state_dir
-      Dir.mkdir_p(state_dir) unless Dir.exists?(state_dir)
-      log_file = File.join(state_dir, "llm_calls.jsonl")
-
-      # Rotate at 20 MB, retain 3
-      rotate_log_if_needed(log_file)
-
-      entry = {
-        timestamp: Time.utc.to_rfc3339,
-        model: @router.current_model,
-        prompt: prompt,
-        completion: completion,
-        latency_ms: latency_ms,
-        error: error
-      }
-
-      File.open(log_file, "a") do |f|
-        f.puts(entry.to_json)
-      end
-    rescue
-      # Non-fatal audit log write failure
-    end
-
-    private def rotate_log_if_needed(log_file : String) : Nil
-      return unless File.exists?(log_file)
-      return unless File.size(log_file) >= Config::AUDIT_LOG_MAX_BYTES
-
-      3.downto(1) do |idx|
-        src = idx == 1 ? log_file : "#{log_file}.#{idx - 1}"
-        dst = "#{log_file}.#{idx}"
-        if File.exists?(src)
-          File.rename(src, dst)
-        end
-      end
-    rescue
     end
   end
 end
