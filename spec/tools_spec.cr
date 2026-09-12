@@ -240,24 +240,69 @@ PY
     end
   end
 
-  describe "model delegation (ask_model)" do
-    it "returns isolated model response without crashing primary turn" do
-      client = FakeClient.new([
-        Mantle::Clients::Response.new(content: "Delegated model answer", tool_calls: nil)
-      ])
-      delegation = Nightmare::Tools::Delegation.new(client)
+  describe "subagent delegation (spawn_subagent)" do
+    it "includes spawn_subagent in primary tools and omits it from subagent tools" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        runner = Nightmare::Harness::SubagentRunner.new(client, env)
+        registry = Nightmare::Tools::Registry.new(guard, client, subagent_runner: runner)
 
-      answer = delegation.ask_model("What is the capital of France?")
-      answer.should eq("Delegated model answer")
+        primary_names = registry.build_tools.map(&.function.name)
+        primary_names.should contain("spawn_subagent")
+        primary_names.should_not contain("ask_model")
+
+        subagent_names = registry.build_subagent_tools.map(&.function.name)
+        subagent_names.should_not contain("spawn_subagent")
+        subagent_names.should_not contain("ask_model")
+      end
     end
 
-    it "encapsulates model errors into result string" do
-      client = FakeClient.new
-      client.raise_on_call[1] = Exception.new("Connection refused")
+    it "returns error when no subagent runner is configured" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        registry = Nightmare::Tools::Registry.new(guard, client)
 
-      delegation = Nightmare::Tools::Delegation.new(client)
-      answer = delegation.ask_model("Query")
-      answer.should contain("[Model delegation error: ClientFailure]")
+        tool = registry.build_tools.find { |t| t.function.name == "spawn_subagent" }
+        tool.should_not be_nil
+
+        result = tool.not_nil!.execute({"task" => JSON::Any.new("investigate something")})
+        result.should contain("[Subagent error: No subagent runner configured]")
+      end
+    end
+
+    it "delegates subtask to subagent runner and formats output" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "[SUMMARY]\nFound 3 occurrences of issue", tool_calls: nil)
+        ])
+        runner = Nightmare::Harness::SubagentRunner.new(client, env)
+        registry = Nightmare::Tools::Registry.new(guard, client, subagent_runner: runner)
+
+        tool = registry.build_tools.find { |t| t.function.name == "spawn_subagent" }
+        result = tool.not_nil!.execute({"task" => JSON::Any.new("check code")})
+
+        result.should contain("[Subagent completed - 0 tool calls]")
+        result.should contain("Found 3 occurrences of issue")
+      end
+    end
+
+    it "encapsulates runner exceptions into result string" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        client.raise_on_call[1] = Exception.new("Connection refused")
+
+        runner = Nightmare::Harness::SubagentRunner.new(client, env)
+        result = runner.run_subagent("Investigate network issue")
+        result.should contain("[Subagent error: ClientFailure]")
+      end
     end
   end
 end

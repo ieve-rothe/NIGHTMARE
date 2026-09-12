@@ -20,11 +20,15 @@ module Nightmare::Harness
     getter client : Mantle::Clients::Client
     getter environment : Nightmare::Workspace::Environment
     getter pacer : Nightmare::Plan::Pacer?
+    getter diff_approval : Proc(String, String, Bool)?
+    getter shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))?
 
     def initialize(
       @client : Mantle::Clients::Client,
       @environment : Nightmare::Workspace::Environment,
-      @pacer : Nightmare::Plan::Pacer? = nil
+      @pacer : Nightmare::Plan::Pacer? = nil,
+      @diff_approval : Proc(String, String, Bool)? = nil,
+      @shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))? = nil
     )
     end
 
@@ -137,6 +141,101 @@ module Nightmare::Harness
         proposed_targets: proposed_targets,
         tokens_used: tokens_used,
       }
+    end
+
+    # Executes an autonomous subagent for a single-turn delegation in the current workspace environment.
+    # Uses build_subagent_tools to ensure subagents have file/shell tools but cannot recursively spawn subagents.
+    def run_subagent(
+      task : String,
+      files_targeted : Array(String) = [] of String,
+      budget_iterations : Int32? = nil
+    ) : String
+      guard = Nightmare::Tools::Guard.new(@environment, files_targeted)
+      files_touched = [] of String
+
+      active_diff_approval = @diff_approval || ->(_diff : String, _desc : String) { true }
+      active_shell_approval = @shell_approval || ->(_cmd : String, _argv : Array(String), _meta : Bool, _to : Int32) {
+        {Nightmare::Tools::ApprovalOutcome::Yes, nil.as(String?)}
+      }
+
+      registry = Nightmare::Tools::Registry.new(
+        guard: guard,
+        client: @client,
+        diff_approval: active_diff_approval,
+        shell_approval: active_shell_approval,
+        default_command_timeout: @environment.settings.command_timeout_seconds,
+        max_command_timeout: @environment.settings.max_command_timeout_seconds,
+        tool_output_max_bytes: @environment.settings.tool_output_max_bytes
+      )
+      registry.set_active_side_effects(files_touched)
+      registry.shell.subagent_mode = true
+
+      subagent_tools = registry.build_subagent_tools
+
+      system_prompt = build_workspace_system_prompt(files_targeted)
+      user_prompt = "Task:\n#{task}\n\nExecute the task now."
+
+      messages = [
+        Mantle::Message.new("system", system_prompt),
+        Mantle::Message.new("user", user_prompt),
+      ]
+
+      tool_calls_count = 0
+      on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
+        if last_res
+          if calls = last_res.tool_calls
+            tool_calls_count += calls.size
+          end
+          if p = @pacer
+            p.pace_turn
+          end
+        end
+        working_msgs
+      }
+
+      max_iterations = budget_iterations || @environment.settings.max_iterations
+      step = Mantle::Step.new(
+        client: @client,
+        tools: subagent_tools,
+        max_iterations: max_iterations,
+        on_iteration: on_iteration
+      )
+
+      begin
+        result = step.run(messages)
+        if result.ok?
+          raw_response = result.unwrap
+          summary, _proposed_items, _proposed_targets = parse_subagent_output(raw_response, "subagent")
+          String.build do |io|
+            io << "[Subagent completed - " << tool_calls_count << " tool call" << (tool_calls_count == 1 ? "" : "s")
+            unless files_touched.empty?
+              io << ", files modified: " << files_touched.uniq.join(", ")
+            end
+            io << "]\n\n"
+            io << summary
+          end
+        else
+          "[Subagent error: #{result.error}]"
+        end
+      rescue ex
+        "[Subagent exception: #{ex.message}]"
+      end
+    end
+
+    private def build_workspace_system_prompt(files_targeted : Array(String)) : String
+      String.build do |io|
+        io << "You are an autonomous subagent executing a specific subtask in " << @environment.root << ".\n"
+        if files_targeted.empty?
+          io << "Target Files: Any permitted within workspace\n"
+        else
+          io << "Target Files (Strictly bounded): " << files_targeted.join(", ") << "\n"
+        end
+        io << "\nCONSTRAINTS & RULES:\n"
+        io << "1. Execute the subtask thoroughly using your available tools.\n"
+        io << "2. NEVER run git commit, git checkout, git reset, git merge, git push, or other git mutation commands.\n"
+        io << "3. You are restricted to modifying files within your target file bounds if specified.\n"
+        io << "4. When complete, provide a final response summarizing what you inspected, changed, or discovered.\n"
+      end
     end
 
     private def build_system_prompt(item : Nightmare::Plan::PlanItem, worktree_path : String) : String

@@ -19,8 +19,10 @@ require "./transcript"
 require "./harness/types"
 require "./harness/tool_loop"
 require "./harness/step_runner"
+require "./harness/subagent_runner"
 require "./ui/approval"
 require "./ui/stream_controller"
+require "./ui/turn_presenter"
 require "./ui/cancellation"
 require "./commands/router"
 
@@ -38,6 +40,7 @@ module Nightmare
     getter tool_loop : Harness::ToolLoop
     getter step_runner : Harness::StepRunner
     getter stream_ctrl : UI::StreamController
+    getter turn_presenter : UI::TurnPresenter
     getter cancellation : UI::Cancellation
     getter router : Commands::Router
     getter model_name : String
@@ -96,11 +99,19 @@ module Nightmare
         Mantle::Clients::LoggingClient.new(raw_client, @env.log_path)
       end
 
-      # 7. Registry with approval hooks
+      # 7. Subagent runner & Registry with approval hooks
       diff_cb = ->(diff : String, desc : String) { @approval.approve_diff(diff, desc) }
       shell_cb = ->(cmd : String, argv : Array(String), meta : Bool, to : Int32) {
         @approval.approve_command(cmd, argv, meta, to)
       }
+
+      subagent_runner = Harness::SubagentRunner.new(
+        client: client,
+        environment: @env,
+        pacer: nil,
+        diff_approval: diff_cb,
+        shell_approval: shell_cb
+      )
 
       @registry = Tools::Registry.new(
         guard: @guard,
@@ -111,7 +122,8 @@ module Nightmare
         pinned_files: @pinned_files,
         default_command_timeout: @env.settings.command_timeout_seconds,
         max_command_timeout: @env.settings.max_command_timeout_seconds,
-        tool_output_max_bytes: @env.settings.tool_output_max_bytes
+        tool_output_max_bytes: @env.settings.tool_output_max_bytes,
+        subagent_runner: subagent_runner
       )
       tools = @registry.build_tools
 
@@ -139,6 +151,13 @@ module Nightmare
       )
 
       # 9. UI & Commands
+      @turn_presenter = UI::TurnPresenter.new(
+        calibrator: @calibrator,
+        threshold_multiplier: @env.settings.file_card_threshold_screens,
+        preview_lines: @env.settings.file_card_preview_lines,
+        max_width: @env.settings.max_dashboard_width
+      )
+      @step_runner.turn_presenter = @turn_presenter
       @stream_ctrl = UI::StreamController.new
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       on_model = ->(new_model : String) {
@@ -210,6 +229,7 @@ module Nightmare
       @registry.set_active_side_effects(side_effects)
 
       # Start turn in context store
+      @turn_presenter.reset_for_new_turn(active_input)
       user_msg = Mantle::Message.new("user", active_input)
       @store.start_turn(user_msg)
 

@@ -33,6 +33,9 @@ module Nightmare
     property shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS
     property shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM
     property initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR
+    property file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS
+    property file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES
+    property max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH
 
     def initialize(
       @model : String = Nightmare::Config::DEFAULT_MODEL,
@@ -57,7 +60,10 @@ module Nightmare
       @shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO,
       @shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS,
       @shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM,
-      @initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR
+      @initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR,
+      @file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS,
+      @file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES,
+      @max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH
     )
     end
 

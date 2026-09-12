@@ -8,7 +8,7 @@ require "./allowlist"
 require "./read_only"
 require "./mutation"
 require "./shell"
-require "./delegation"
+require "../harness/subagent_runner"
 
 module Nightmare::Tools
   class Registry
@@ -17,7 +17,7 @@ module Nightmare::Tools
     getter read_only : ReadOnly
     getter mutation : Mutation
     getter shell : Shell
-    getter delegation : Delegation
+    property subagent_runner : Harness::SubagentRunner?
 
     def initialize(
       @guard : Guard,
@@ -28,7 +28,8 @@ module Nightmare::Tools
       pinned_files : Context::PinnedFiles? = nil,
       default_command_timeout : Int32 = Config::SHELL_COMMAND_TIMEOUT_SECONDS,
       max_command_timeout : Int32 = Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
-      tool_output_max_bytes : Int32 = Config::TOOL_OUTPUT_MAX_BYTES
+      tool_output_max_bytes : Int32 = Config::TOOL_OUTPUT_MAX_BYTES,
+      @subagent_runner : Harness::SubagentRunner? = nil
     )
       @read_only = ReadOnly.new(@guard, pinned_files)
       @mutation = Mutation.new(@guard, diff_approval)
@@ -40,7 +41,6 @@ module Nightmare::Tools
         max_timeout_seconds: max_command_timeout,
         tool_output_max_bytes: tool_output_max_bytes
       )
-      @delegation = Delegation.new(client)
     end
 
     def set_active_side_effects(effects : Array(String)?) : Nil
@@ -59,7 +59,7 @@ module Nightmare::Tools
         build_replace_in_file_tool,
         build_append_to_file_tool,
         build_run_command_tool,
-        build_ask_model_tool,
+        build_spawn_subagent_tool,
       ]
     end
 
@@ -204,16 +204,34 @@ module Nightmare::Tools
       end
     end
 
-    private def build_ask_model_tool : Mantle::Tools::Tool
+    private def build_spawn_subagent_tool : Mantle::Tools::Tool
       props = {
-        "prompt" => Mantle::Tools::PropertyDefinition.new("string", "Sub-prompt to delegate to isolated model"),
+        "task"           => Mantle::Tools::PropertyDefinition.new("string", "The concrete task or deliverable for the subagent to execute"),
+        "files_targeted" => Mantle::Tools::PropertyDefinition.new("string", "Optional comma-separated list of target files or globs permitted for mutation"),
       }
-      schema = Mantle::Tools::ParametersSchema.new(props, ["prompt"])
-      func = Mantle::Tools::FunctionDefinition.new("ask_model", "Performs stateless one-shot inference delegation without history pollution.", schema)
+      schema = Mantle::Tools::ParametersSchema.new(props, ["task"])
+      func = Mantle::Tools::FunctionDefinition.new(
+        "spawn_subagent",
+        "Spawns an autonomous subagent with its own tool loop to execute a concrete subtask without polluting parent history.",
+        schema
+      )
 
       Mantle::Tools::Tool.new(func) do |args|
-        prompt = args["prompt"]?.try(&.as_s) || ""
-        @delegation.ask_model(prompt)
+        task = args["task"]?.try(&.as_s) || args["prompt"]?.try(&.as_s) || args["query"]?.try(&.as_s) || ""
+        files_targeted = [] of String
+        if raw_targets = args["files_targeted"]?
+          if raw_targets.as_a?
+            files_targeted = raw_targets.as_a.compact_map(&.as_s?)
+          elsif s = raw_targets.as_s?
+            files_targeted = s.split(',').map(&.strip).reject(&.empty?)
+          end
+        end
+
+        if runner = @subagent_runner
+          runner.run_subagent(task, files_targeted)
+        else
+          "[Subagent error: No subagent runner configured]"
+        end
       end
     end
   end

@@ -13,7 +13,7 @@ describe Nightmare::SystemPrompt do
             result.path.should be_nil
             result.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
             result.text.should contain("You are an execution agent operating in the current working directory.")
-            result.text.should contain("Prefer replace_in_file for edits; read before you write")
+            result.text.should contain("Prefer replace_in_file. Use whole-file writes only for new files.")
 
             # Destructuring tuple support
             content, source = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)

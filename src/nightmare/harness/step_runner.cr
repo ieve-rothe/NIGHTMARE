@@ -10,6 +10,7 @@ require "./types"
 require "./tool_loop"
 require "./retrier"
 require "./loop_detector"
+require "../ui/turn_presenter"
 
 module Nightmare::Harness
   class StepRunner
@@ -21,6 +22,7 @@ module Nightmare::Harness
     property max_iterations : Int32
     property format_retries : Int32
     property overflow_retries : Int32
+    property turn_presenter : UI::TurnPresenter? = nil
 
     def initialize(
       @client : Mantle::Clients::Client,
@@ -286,8 +288,12 @@ module Nightmare::Harness
           elsif orig_handler
             begin
               res = orig_handler.call(args)
-              puts res
-              STDOUT.flush
+              if presenter = @turn_presenter
+                presenter.present_tool_result(tool_name, args, res)
+              else
+                puts res
+                STDOUT.flush
+              end
               res
             rescue ex : SecurityError
               err = "[SecurityError: #{ex.message}]"

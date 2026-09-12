@@ -206,9 +206,9 @@ Approve command? [y/N/e/a/p]:
 > [!IMPORTANT]
 > **Metacharacter Ban**: Commands containing shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``, `$()`, `>`, `<`) **cannot** be auto-approved via `[a]` or `[p]`. They will always trigger an interactive prompt to protect against command injection.
 
-### Model Delegation (`ask_model`)
+### Subagent Delegation (`spawn_subagent`)
 
-- **`ask_model(prompt, model)`**: Delegates a stateless sub-agent query to an isolated Mantle step runner without polluting the primary REPL turn context.
+- **`spawn_subagent(task, files_targeted)`**: Delegates an autonomous sub-task to an isolated subagent runner equipped with its own multi-step tool execution loop (reading files, searching, editing files, running commands). The subagent executes within target file bounds, strictly blocks recursive subagent calls and git mutation commands, and returns a concise summary of results without polluting the primary REPL turn context.
 
 ---
 
