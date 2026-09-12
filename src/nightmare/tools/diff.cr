@@ -2,8 +2,32 @@
 # Copyright (C) 2026 Cam Carroll
 # Licensed under the AGPL-3.0. See LICENSE for details.
 
+require "colorize"
+
 module Nightmare::Tools
   module Diff
+    # Formats unified diff text with ANSI syntax highlighting for terminal presentation
+    def self.colorize(diff : String) : String
+      return "" if diff.empty?
+
+      lines = diff.split('\n')
+      colored_lines = lines.map do |line|
+        if line.starts_with?("--- ") || line.starts_with?("+++ ")
+          line.colorize.mode(:bold).to_s
+        elsif line.starts_with?("@@")
+          line.colorize(:cyan).to_s
+        elsif line.starts_with?('+')
+          line.colorize(:green).to_s
+        elsif line.starts_with?('-')
+          line.colorize(:red).to_s
+        else
+          line
+        end
+      end
+
+      colored_lines.join('\n')
+    end
+
     # Generates a standard unified diff between original and updated strings
     def self.unified_diff(
       original : String,

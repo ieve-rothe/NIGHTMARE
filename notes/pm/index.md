@@ -13,3 +13,4 @@ This file tracks the status and priority of all development tickets for the `nig
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | [TKT-001](notes/pm/closed/TKT-001-rename-directives-to-system-prompt.md) | Rename Directives Terminology to System Prompt Across Codebase | Architecture & Terminology | Closed | Med | 2026-09-11 |
+| [TKT-003](notes/pm/closed/TKT-003-colorize-diff-presentation.md) | Colorize Diff Presentation for File Changes | User Interface & Tooling | Closed | Med | 2026-09-11 |
