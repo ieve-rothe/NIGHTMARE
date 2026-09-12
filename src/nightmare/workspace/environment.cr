@@ -208,6 +208,14 @@ module Nightmare::Workspace
       @settings.logging
     end
 
+    def resolve_theme(cli_override : String? = nil) : String
+      return cli_override if cli_override && !cli_override.empty?
+      if env_theme = ENV["NIGHTMARE_THEME"]?
+        return env_theme unless env_theme.empty?
+      end
+      @settings.theme
+    end
+
     private def resolve_xdg(env_var : String, param : String?, fallback : String) : String
       if param && !param.empty?
         param

@@ -36,6 +36,7 @@ module Nightmare
     property file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS
     property file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES
     property max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH
+    property theme : String = Nightmare::Config::DEFAULT_THEME
 
     def initialize(
       @model : String = Nightmare::Config::DEFAULT_MODEL,
@@ -63,7 +64,8 @@ module Nightmare
       @initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR,
       @file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS,
       @file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES,
-      @max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH
+      @max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH,
+      @theme : String = Nightmare::Config::DEFAULT_THEME
     )
     end
 

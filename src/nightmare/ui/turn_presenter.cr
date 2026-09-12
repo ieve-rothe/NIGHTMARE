@@ -124,19 +124,32 @@ module Nightmare::UI
           # Under threshold: render verbatim inside clean panel
           term_w = Salamander::UI.terminal_width
           box_w = Panel.clamp_width(term_w, @max_width)
-          panel = Panel.new(box_w)
+          panel = Panel.new(box_w, Theme.box_style)
 
-          file_title = "#{Theme::TITLE}📄 read_file:#{Theme::RESET} #{Theme::FILENAME}#{opened.path}#{Theme::RESET} #{Theme::META_DIM}(#{opened.lines}L · #{format_bytes(opened.size_bytes)} · #{format_tokens(opened.tokens)})#{Theme::RESET}"
+          file_title = "#{Theme.title}📄 read_file:#{Theme::RESET} #{Theme.filename}#{opened.path}#{Theme::RESET} #{Theme.meta_dim}(#{opened.lines}L · #{format_bytes(opened.size_bytes)} · #{format_tokens(opened.tokens)})#{Theme::RESET}"
           @output.puts
-          @output.puts panel.render_header(file_title, nil, Theme::BORDER)
+          @output.puts panel.render_header(file_title, nil, Theme.border)
           opened.content.lines.each_with_index do |l, i|
             lnum = ((offset || 1) + i).to_s.rjust(4)
-            formatted = "#{Theme::LINE_NO}#{lnum} │#{Theme::RESET} #{Theme::CODE_TEXT}#{l}#{Theme::RESET}"
-            @output.puts panel.render_row(formatted, Theme::BORDER)
+            formatted = "#{Theme.line_no}#{lnum} │#{Theme::RESET} #{Theme.code_text}#{l}#{Theme::RESET}"
+            @output.puts panel.render_row(formatted, Theme.border)
           end
-          @output.puts panel.render_footer(Theme::BORDER)
+          @output.puts panel.render_footer(Theme.border)
           @output.flush
         end
+      elsif name == "write_file" || name == "replace_in_file" || name == "append_to_file"
+        path = args["path"]?.try(&.as_s?) || args["filepath"]?.try(&.as_s?) || "file"
+        tag = Theme.bracket_tag("MUTATION", name.upcase, Theme.success_icon)
+        @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        @output.flush
+      elsif name == "shell"
+        cmd = args["command"]?.try(&.as_s?) || "shell"
+        tag = Theme.bracket_tag("EXEC", "SHELL", Theme.status_tag)
+        @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET}"
+        result_str.strip.each_line do |line|
+          @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+        end
+        @output.flush
       else
         # For non-file tools, print result or summary
         @output.puts result_str
@@ -148,72 +161,72 @@ module Nightmare::UI
     def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil) : Nil
       term_w = Salamander::UI.terminal_width
       box_w = Panel.clamp_width(term_w, @max_width)
-      panel = Panel.new(box_w)
+      panel = Panel.new(box_w, Theme.box_style)
 
       if @output == STDOUT && STDOUT.tty?
         Salamander::UI.clear_screen
       end
 
       # 1. Turn Banner & Prompt Card
-      turn_title = "#{Theme::TITLE}NIGHTMARE REPL#{Theme::RESET} #{Theme::META_DIM}· TURN #{@turn_number}#{Theme::RESET}"
-      status_badge = "#{Theme::TOKEN_BADGE}● CARDS COMPRESSED#{Theme::RESET}"
+      turn_title = "#{Theme.title}NIGHTMARE REPL#{Theme::RESET} #{Theme.meta_dim}· TURN #{@turn_number}#{Theme::RESET}"
+      status_badge = "#{Theme.token_badge}● CARDS COMPRESSED#{Theme::RESET}"
 
-      @output.puts panel.render_header(turn_title, status_badge, Theme::BORDER)
-      prompt_content = "#{Theme::USER_PROMPT}> #{@current_user_prompt}#{Theme::RESET}"
-      @output.puts panel.render_row(prompt_content, Theme::BORDER)
+      @output.puts panel.render_header(turn_title, status_badge, Theme.border)
+      prompt_content = "#{Theme.user_prompt}#{Theme.prompt_glyph}#{@current_user_prompt}#{Theme::RESET}"
+      @output.puts panel.render_row(prompt_content, Theme.border)
 
       if thought = @agent_thought
-        thought_content = "#{Theme::THOUGHT}💭 #{thought}#{Theme::RESET}"
-        @output.puts panel.render_row(thought_content, Theme::BORDER)
+        thought_content = "#{Theme.thought}💭 #{thought}#{Theme::RESET}"
+        @output.puts panel.render_row(thought_content, Theme.border)
       end
 
       total_b = @opened_files.sum(&.size_bytes)
       total_tok = @opened_files.sum(&.tokens)
-      stats_content = "#{Theme::META_DIM}Files:#{Theme::RESET} #{@opened_files.size} (#{format_bytes(total_b)}, #{Theme::TOKEN_BADGE}#{format_tokens(total_tok)}#{Theme::RESET}) #{Theme::META_DIM}│ Loaded:#{Theme::RESET} #{total_accumulated_lines}/#{threshold_lines}L #{Theme::META_DIM}│ Layout:#{Theme::RESET} #{box_w}c"
-      @output.puts panel.render_divider(Theme::BORDER)
-      @output.puts panel.render_row(stats_content, Theme::BORDER)
-      @output.puts panel.render_footer(Theme::BORDER)
+      stats_content = "#{Theme.meta_dim}Files:#{Theme::RESET} #{@opened_files.size} (#{format_bytes(total_b)}, #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}) #{Theme.meta_dim}│ Loaded:#{Theme::RESET} #{total_accumulated_lines}/#{threshold_lines}L #{Theme.meta_dim}│ Layout:#{Theme::RESET} #{box_w}c"
+      @output.puts panel.render_divider(Theme.border)
+      @output.puts panel.render_row(stats_content, Theme.border)
+      @output.puts panel.render_footer(Theme.border)
       @output.puts
 
       # 2. Grouped Opened Files Deck
-      deck_title = "#{Theme::TITLE}📚 Opened Files#{Theme::RESET} #{Theme::META_DIM}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme::TOKEN_BADGE}#{format_tokens(total_tok)}#{Theme::RESET}#{Theme::META_DIM})#{Theme::RESET}"
-      badge = "#{Theme::META_DIM}ALL IN ONE BOX#{Theme::RESET}"
-      @output.puts panel.render_header(deck_title, badge, Theme::BORDER_ACTIVE)
+      deck_title = "#{Theme.title}📚 Opened Files#{Theme::RESET} #{Theme.meta_dim}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}#{Theme.meta_dim})#{Theme::RESET}"
+      badge = "#{Theme.meta_dim}ALL IN ONE BOX#{Theme::RESET}"
+      @output.puts panel.render_header(deck_title, badge, Theme.border_active)
 
       @opened_files.each do |f|
-        icon = "#{Theme::SUCCESS_ICON}✓#{Theme::RESET}"
-        fname = "#{Theme::FILENAME}#{f.path}#{Theme::RESET}"
-        meta = "#{Theme::META_DIM}[#{format_bytes(f.size_bytes)} · #{f.lines}L · #{Theme::TOKEN_BADGE}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme::META_DIM} · #{f.read_range}]#{Theme::RESET}"
+        icon = "#{Theme.success_icon}✓#{Theme::RESET}"
+        fname = "#{Theme.filename}#{f.path}#{Theme::RESET}"
+        meta = "#{Theme.meta_dim}[#{format_bytes(f.size_bytes)} · #{f.lines}L · #{Theme.token_badge}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme.meta_dim} · #{f.read_range}]#{Theme::RESET}"
         row_str = " #{icon} #{fname} #{meta}"
-        @output.puts panel.render_row(row_str, Theme::BORDER_ACTIVE)
+        @output.puts panel.render_row(row_str, Theme.border_active)
       end
 
-      @output.puts panel.render_footer(Theme::BORDER_ACTIVE)
+      @output.puts panel.render_footer(Theme.border_active)
       @output.puts
 
       # 3. Active File Preview Box
       if active = active_file
         active_lines_count = active.lines
         hi_line = [active_offset + @preview_lines - 1, active_lines_count].min
-        prev_title = "#{Theme::TITLE_ACTIVE}🔍 Active Inspection:#{Theme::RESET} #{Theme::FILENAME}#{active.path}#{Theme::RESET} #{Theme::META_DIM}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
-        prev_badge = "#{Theme::TOKEN_BADGE}#{format_tokens(active.tokens)}#{Theme::RESET}"
-        @output.puts panel.render_header(prev_title, prev_badge, Theme::BORDER)
+        prev_title = "#{Theme.title_active}🔍 Active Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
+        prev_badge = "#{Theme.token_badge}#{format_tokens(active.tokens)}#{Theme::RESET}"
+        @output.puts panel.render_header(prev_title, prev_badge, Theme.border)
 
         code_lines = CodePreview.render(
           lines: active.content.lines,
           start_offset: active_offset,
           max_preview_lines: @preview_lines,
           panel: panel,
-          border_color: Theme::BORDER
+          border_color: Theme.border
         )
         code_lines.each { |l| @output.puts l }
-        @output.puts panel.render_footer(Theme::BORDER)
+        @output.puts panel.render_footer(Theme.border)
         @output.puts
       end
 
       # Action label
       if action = action_label
-        @output.puts "  #{Theme::HIGHLIGHT}⚡ Action:#{Theme::RESET} #{action}"
+        @output.puts "  #{Theme.highlight}⚡ Action:#{Theme::RESET} #{action}"
       end
       @output.flush
     end

@@ -10,6 +10,8 @@ require "../tools/guard"
 require "../workspace/environment"
 require "../plan"
 require "../harness/subagent_runner"
+require "../config"
+require "colorize"
 
 module Nightmare::Commands
   class Router
@@ -28,6 +30,9 @@ module Nightmare::Commands
     property active_orchestrator : Nightmare::Plan::Orchestrator? = nil
     property last_plan_run : Nightmare::Plan::PlanRun? = nil
 
+    getter stdin : IO
+    getter stdout : IO
+
     def initialize(
       @store : Context::SlidingStore,
       @pinned_files : Context::PinnedFiles,
@@ -39,20 +44,34 @@ module Nightmare::Commands
       @current_model : String,
       @on_model_change : Proc(String, Nil)? = nil,
       @client : Mantle::Clients::Client? = nil,
-      @pacer : Nightmare::Plan::Pacer = Nightmare::Plan::Pacer.new
+      @pacer : Nightmare::Plan::Pacer = Nightmare::Plan::Pacer.new,
+      @stdin : IO = STDIN,
+      @stdout : IO = STDOUT
     )
     end
 
-    # Checks if an input line is a slash command
+    # Checks if an input line is a slash command or multiline trigger
     def slash_command?(input : String) : Bool
-      input.strip.starts_with?('/')
+      trimmed = input.strip
+      trimmed.starts_with?('/') || trimmed.starts_with?("\"\"\"")
     end
 
     # Routes and executes a slash command. Returns true if handled, false if not a command.
     # May return a String if the command produces input for the LLM (e.g. /paste).
     def handle(input : String) : Tuple(Bool, String?)
       trimmed = input.strip
-      return {false, nil} unless trimmed.starts_with?('/')
+      return {false, nil} unless trimmed.starts_with?('/') || trimmed.starts_with?("\"\"\"")
+
+      if trimmed.starts_with?("\"\"\"")
+        if trimmed.ends_with?("\"\"\"") && trimmed.size >= 6
+          content = trimmed[3..-4].strip
+          return {true, content.empty? ? nil : content}
+        end
+
+        initial_line = trimmed.size > 3 ? trimmed[3..-1] : nil
+        text = handle_paste(initial_line)
+        return {true, text}
+      end
 
       parts = trimmed.split(' ', 2)
       cmd = parts[0].downcase
@@ -100,6 +119,9 @@ module Nightmare::Commands
       when "/mode"
         handle_mode(args)
         {true, nil}
+      when "/theme"
+        handle_theme(args)
+        {true, nil}
       when "/exit", "/quit"
         exit(0)
       else
@@ -130,10 +152,32 @@ Available Slash Commands:
   /prompt [edit]   View or edit in-memory system prompt
   /review          Inspect assembled prompt, pinned files, and token usage
   /thinking        View model internal chain-of-thought from last turn
+  /theme [name]    Switch theme (cyberpunk, outrun, phosphor, classic)
   /model [name]    Inspect or change the active LLM model
-  /paste           Enter multi-line input paste mode
+  /paste           Enter multi-line input paste mode (or """)
   /exit            Exit the session
 HELP
+    end
+
+    private def handle_theme(args : String) : Nil
+      if args.empty?
+        active = Salamander::UI::Theme.current.name
+        puts "\nAvailable Themes:"
+        Salamander::UI::Theme.all_names.each do |name|
+          marker = (name == active) ? "● (active)" : "○"
+          puts "  #{marker} #{name}"
+        end
+        puts "\nUsage: /theme <name> (e.g. /theme outrun, /theme phosphor, /theme cyberpunk, /theme classic)"
+      else
+        target = args.downcase
+        begin
+          new_theme = Salamander::UI::Theme.set_theme(target)
+          @env.settings.theme = target
+          puts "Theme switched to #{new_theme.title}#{target.upcase}#{Salamander::UI::Theme::RESET}."
+        rescue ex : ArgumentError
+          puts ex.message
+        end
+      end
     end
 
     private def handle_drop(path : String) : Nil
@@ -278,15 +322,40 @@ HELP
       end
     end
 
-    private def handle_paste : String?
-      puts "Paste mode enabled. Enter lines below. Submit with a line containing '/end' or empty line:"
+    private def handle_paste(initial_line : String? = nil) : String?
+      @stdout.puts " ↳ Multi-line mode active. Paste your text, then type '\"\"\"' or '/end' on a new line to send.".colorize(:yellow)
       lines = [] of String
-      while line = STDIN.gets
-        break if line.strip == "/end" || line.strip.empty?
+      lines << initial_line if initial_line && !initial_line.empty?
+
+      lines_read = lines.size
+      chars_read = lines.sum(&.size)
+
+      while line = @stdin.gets
+        break if line.strip.in?("/end", "\"\"\"")
+
+        lines_read += 1
+        chars_read += line.size
+
+        if lines_read > Nightmare::Config::MAX_MULTILINE_LINES || chars_read > Nightmare::Config::MAX_MULTILINE_CHARS
+          @stdout.puts "[System] Maximum input limit reached. Truncating input.".colorize(:red)
+          if chars_read > Nightmare::Config::MAX_MULTILINE_CHARS && lines_read <= Nightmare::Config::MAX_MULTILINE_LINES
+            excess = chars_read - Nightmare::Config::MAX_MULTILINE_CHARS
+            allowed = line.size - excess
+            lines << line[0, allowed]
+          end
+          break
+        end
+
         lines << line
       end
-      joined = lines.join("\n")
-      joined.empty? ? nil : joined
+
+      joined = lines.join("\n").strip
+      if joined.empty?
+        nil
+      else
+        @stdout.puts " ↳ Text captured. Processing...".colorize(:dark_gray)
+        joined
+      end
     end
 
     private def handle_plan(args : String) : Nil

@@ -58,6 +58,7 @@ module Nightmare
     )
       @markdown_formatting = @env.resolve_markdown_formatting(markdown_override)
       @no_log = @no_log || !@env.resolve_logging(cli_no_log: @no_log)
+      Salamander::UI::Theme.set_theme(@env.resolve_theme)
 
       # 1. System prompt resolution
       prompt = SystemPrompt::Resolver.resolve(@env, system_prompt_path)
@@ -183,10 +184,12 @@ module Nightmare
       STDOUT.flush
 
       loop do
-        print "> "
+        print "#{Salamander::UI::Theme.prompt_glyph}#{Salamander::UI::Theme.user_prompt}"
         STDOUT.flush
 
         line = STDIN.gets
+        print Salamander::UI::Theme::RESET
+        STDOUT.flush
         if line.nil?
           if @cancellation.sigint_received?
             @cancellation.sigint_received = false

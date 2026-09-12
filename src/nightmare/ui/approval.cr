@@ -39,13 +39,25 @@ module Nightmare::UI
       has_metachar : Bool,
       timeout_seconds : Int32
     ) : Tuple(Tools::ApprovalOutcome, String?)
-      @output.puts "\nCommand: #{command}"
-      @output.puts "Cwd:     #{@root}"
-      @output.puts "Timeout: #{timeout_seconds}s"
+      term_w = Salamander::UI.terminal_width
+      box_w = Salamander::UI::Panel.clamp_width(term_w, 105)
+      panel = Salamander::UI::Panel.new(box_w, Salamander::UI::BoxStyle::Armored)
+      border = Salamander::UI::Theme.border_active
+      header_title = "#{Salamander::UI::Theme.title_active}⚡ SECURITY GATEWAY // SHELL EXECUTION#{Salamander::UI::Theme::RESET}"
+      header_badge = "#{Salamander::UI::Theme.token_badge}#{timeout_seconds}s timeout#{Salamander::UI::Theme::RESET}"
+
+      @output.puts
+      @output.puts panel.render_header(header_title, header_badge, border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Command: #{command}", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Cwd:     #{@root}", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Timeout: #{timeout_seconds}s", border, Salamander::UI::BoxStyle::Armored)
       if has_metachar
-        @output.puts "Note: Shell metacharacters cannot be saved to allowlist (will run once)".colorize(:yellow)
+        note = "Note: Shell metacharacters cannot be saved to allowlist (will run once)".colorize(:yellow).to_s
+        @output.puts panel.render_row(note, border, Salamander::UI::BoxStyle::Armored)
       end
-      @output.puts "Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix"
+      @output.puts panel.render_divider(border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_footer(border, Salamander::UI::BoxStyle::Armored)
 
       loop do
         @output.print "Approve command? [y/N/e/a/p]: "
