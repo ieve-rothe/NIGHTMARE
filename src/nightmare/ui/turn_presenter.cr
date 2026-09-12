@@ -160,6 +160,7 @@ module Nightmare::UI
     # Clears screen and renders single-turn dashboard with Opened Files Deck & Active Preview
     def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil) : Nil
       term_w = Salamander::UI.terminal_width
+      term_h = Salamander::UI.terminal_height
       box_w = Panel.clamp_width(term_w, @max_width)
       panel = Panel.new(box_w, Theme.box_style)
 
@@ -173,7 +174,10 @@ module Nightmare::UI
 
       @output.puts panel.render_header(turn_title, status_badge, Theme.border)
       prompt_content = "#{Theme.user_prompt}#{Theme.prompt_glyph}#{@current_user_prompt}#{Theme::RESET}"
-      @output.puts panel.render_row(prompt_content, Theme.border)
+      max_prompt_lines = term_h <= 30 ? 2 : 4
+      panel.render_wrapped_row(prompt_content, Theme.border, max_lines: max_prompt_lines).each do |line|
+        @output.puts line
+      end
 
       if thought = @agent_thought
         thought_content = "#{Theme.thought}💭 #{thought}#{Theme::RESET}"
@@ -190,13 +194,29 @@ module Nightmare::UI
 
       # 2. Grouped Opened Files Deck
       deck_title = "#{Theme.title}📚 Opened Files#{Theme::RESET} #{Theme.meta_dim}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}#{Theme.meta_dim})#{Theme::RESET}"
-      badge = "#{Theme.meta_dim}ALL IN ONE BOX#{Theme::RESET}"
+      badge = box_w < 75 ? nil : "#{Theme.meta_dim}ALL IN ONE BOX#{Theme::RESET}"
       @output.puts panel.render_header(deck_title, badge, Theme.border_active)
 
-      @opened_files.each do |f|
+      max_deck_files = term_h <= 28 ? 4 : 8
+      displayed_files = if @opened_files.size > max_deck_files
+        @opened_files.last(max_deck_files)
+      else
+        @opened_files
+      end
+
+      if @opened_files.size > displayed_files.size
+        overflow_count = @opened_files.size - displayed_files.size
+        @output.puts panel.render_row("  #{Theme.meta_dim}... [+#{overflow_count} earlier files in context] ...#{Theme::RESET}", Theme.border_active)
+      end
+
+      displayed_files.each do |f|
         icon = "#{Theme.success_icon}✓#{Theme::RESET}"
         fname = "#{Theme.filename}#{f.path}#{Theme::RESET}"
-        meta = "#{Theme.meta_dim}[#{format_bytes(f.size_bytes)} · #{f.lines}L · #{Theme.token_badge}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme.meta_dim} · #{f.read_range}]#{Theme::RESET}"
+        meta = if box_w < 70
+          "#{Theme.meta_dim}[#{format_bytes(f.size_bytes)} · #{Theme.token_badge}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme.meta_dim}]#{Theme::RESET}"
+        else
+          "#{Theme.meta_dim}[#{format_bytes(f.size_bytes)} · #{f.lines}L · #{Theme.token_badge}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme.meta_dim} · #{f.read_range}]#{Theme::RESET}"
+        end
         row_str = " #{icon} #{fname} #{meta}"
         @output.puts panel.render_row(row_str, Theme.border_active)
       end
@@ -207,15 +227,27 @@ module Nightmare::UI
       # 3. Active File Preview Box
       if active = active_file
         active_lines_count = active.lines
-        hi_line = [active_offset + @preview_lines - 1, active_lines_count].min
-        prev_title = "#{Theme.title_active}🔍 Active Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
+        effective_preview = if term_h <= 28
+          Math.min(@preview_lines, 4)
+        elsif term_h <= 35
+          Math.min(@preview_lines, 6)
+        else
+          @preview_lines
+        end
+
+        hi_line = [active_offset + effective_preview - 1, active_lines_count].min
+        prev_title = if box_w < 70
+          "#{Theme.title_active}🔍 Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line})#{Theme::RESET}"
+        else
+          "#{Theme.title_active}🔍 Active Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
+        end
         prev_badge = "#{Theme.token_badge}#{format_tokens(active.tokens)}#{Theme::RESET}"
         @output.puts panel.render_header(prev_title, prev_badge, Theme.border)
 
         code_lines = CodePreview.render(
           lines: active.content.lines,
           start_offset: active_offset,
-          max_preview_lines: @preview_lines,
+          max_preview_lines: effective_preview,
           panel: panel,
           border_color: Theme.border
         )

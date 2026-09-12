@@ -89,9 +89,44 @@ describe Nightmare::UI::TurnPresenter do
 
     clean2 = Salamander::UI::Panel.strip_ansi(io.to_s)
     clean2.should contain("Opened Files")
-    clean2.should contain("ALL IN ONE BOX")
     clean2.should contain("test.cr")
     clean2.should contain("large.cr")
-    clean2.should contain("Active Inspection: large.cr")
+  end
+
+  it "renders cleanly in a narrow/short terminal without overflowing width or height" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(
+      calibrator: calibrator,
+      threshold_multiplier: 0.5,
+      preview_lines: 8,
+      max_width: 65,
+      output: io
+    )
+
+    long_prompt = "Please see if you need to make any updates to the daily ledger or decision log, or the current bead.md, based on our current progress. Also, please evaluate, what is the current goal described in bead.md, have we been on track or did we get sidetracked?"
+    presenter.reset_for_new_turn(long_prompt)
+
+    (1..5).each do |idx|
+      presenter.record_file_open("file_#{idx}.md", "content for file #{idx}\n" * 10)
+    end
+
+    presenter.render_dashboard(
+      active_file: presenter.opened_files.first,
+      active_offset: 1,
+      action_label: "read_file('bead.md')"
+    )
+
+    rendered = io.to_s
+    lines = rendered.lines
+
+    # Verify no line exceeds max_width
+    lines.each_with_index do |l, idx|
+      v_w = Salamander::UI::Panel.visual_width(l)
+      v_w.should be <= 65, "Line #{idx + 1} width #{v_w} exceeded 65: '#{l}'"
+    end
+
+    # Verify total lines fit within a 27-row terminal budget
+    lines.size.should be <= 27
   end
 end
