@@ -305,4 +305,123 @@ PY
       end
     end
   end
+
+  describe "hardened security boundaries and vulnerability mitigations" do
+    it "isolates parent process environment and prevents secret leakage (VULN-01)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+        allowlist.allow_session_prefix(["printenv"])
+
+        ENV["NIGHTMARE_TEST_SECRET"] = "super_secret_token_12345"
+        begin
+          shell = Nightmare::Tools::Shell.new(guard, allowlist)
+          result = shell.run_command("printenv NIGHTMARE_TEST_SECRET", timeout_seconds: 2)
+          result.should_not contain("super_secret_token_12345")
+        ensure
+          ENV.delete("NIGHTMARE_TEST_SECRET")
+        end
+      end
+    end
+
+    it "rejects single-dash -exec, bundled flags, and attached options in flag denylist (VULN-05)" do
+      denylist_attempts = [
+        ["find", ".", "-exec", "whoami", "+"],
+        ["find", ".", "-execdir", "ls", ";"],
+        ["find", ".", "-ok", "sh", ";"],
+        ["git", "-C/etc", "status"],
+        ["git", "-c=foo", "status"],
+        ["git", "fetch", "--upload-pack=evil"],
+        ["perl", "-ne", "print"],
+        ["perl", "-pe", "exec"],
+        ["bash", "-ec", "whoami"],
+        ["ruby", "-we", "puts 1"],
+        ["python3", "-cprint(1)"],
+        ["env", "FOO=BAR", "sh"],
+      ]
+
+      denylist_attempts.each do |argv|
+        Nightmare::Tools::Allowlist.has_denylisted_flags?(argv).should be_true, "Expected #{argv.inspect} to hit flag denylist"
+      end
+    end
+
+    it "bans carriage returns, glob wildcards, and tilde expansions in metacharacter checks (VULN-03, VULN-08)" do
+      metachar_cmds = [
+        "git status\r",
+        "cat /???/??ss??",
+        "ls [a-z]",
+        "cat ~/secret",
+        "echo # comment",
+        "echo \e[2K",
+      ]
+
+      metachar_cmds.each do |cmd|
+        Nightmare::Tools::Allowlist.contains_metacharacters?(cmd).should be_true, "Expected '#{cmd}' to contain metacharacters"
+      end
+    end
+
+    it "restricts operand prefix approvals and prevents trailing file exfiltration (VULN-04)" do
+      allowlist = Nightmare::Tools::Allowlist.new
+
+      # Approving prefix on an operand-based utility (cat) saves exact command, not open prefix
+      allowlist.allow_session_prefix(["cat", "PROGRESS.md"])
+
+      # Genuine command is allowed
+      allowlist.auto_approvable?("cat PROGRESS.md", ["cat", "PROGRESS.md"]).should be_true
+
+      # Trailing file exfiltration attempt is blocked
+      allowlist.auto_approvable?("cat PROGRESS.md /etc/shadow", ["cat", "PROGRESS.md", "/etc/shadow"]).should be_false
+      allowlist.auto_approvable?("cat /etc/shadow", ["cat", "/etc/shadow"]).should be_false
+
+      # Subcommand utility (git) allows subcommands
+      allowlist.allow_session_prefix(["git", "status"])
+      allowlist.auto_approvable?("git status", ["git", "status"]).should be_true
+      allowlist.auto_approvable?("git status -s", ["git", "status", "-s"]).should be_true
+      allowlist.auto_approvable?("git checkout", ["git", "checkout"]).should be_false
+    end
+
+    it "atomically preserves regex patterns and exact rules during save_persistent (VULN-09)" do
+      with_temp_dir do |root|
+        allow_file = File.join(root, "allow")
+        File.write(allow_file, "prefix:git status\n^crystal spec.*$\nls -la\n")
+
+        allowlist = Nightmare::Tools::Allowlist.new(allow_file)
+        allowlist.allow_persist_exact(["echo", "hello"])
+
+        content = File.read(allow_file)
+        content.should contain("prefix:git status")
+        content.should contain("^crystal spec.*$")
+        content.should contain("ls -la")
+        content.should contain("echo hello")
+      end
+    end
+
+    it "re-validates edited commands through loop before execution (VULN-10)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        call_count = 0
+        handler = ->(cmd : String, argv : Array(String), has_meta : Bool, timeout : Int32) {
+          call_count += 1
+          if call_count == 1
+            # First prompt: edit to a dangerous command with metacharacters
+            {Nightmare::Tools::ApprovalOutcome::Edit, "git status; rm -rf /"}
+          else
+            # Second prompt: verified that dangerous edit was intercepted
+            {Nightmare::Tools::ApprovalOutcome::No, nil.as(String?)}
+          end
+        }
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist, approval_handler: handler)
+        result = shell.run_command("git status")
+
+        call_count.should eq(2)
+        result.should eq("[Execution rejected by user]")
+      end
+    end
+  end
 end
+

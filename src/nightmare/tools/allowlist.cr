@@ -15,7 +15,22 @@ module Nightmare::Tools
     getter persistent_patterns : Array(Regex)
 
     # Characters that bar auto-approval and force interactive confirmation (R3 / §4.2)
-    METACHARACTERS = [';', '&', '|', '`', '$', '>', '<', '\n', '(', ')', '{', '}', '\\', '*']
+    METACHARACTERS = [
+      ';', '&', '|', '`', '$', '>', '<', '\n', '\r', '(', ')', '{', '}',
+      '\\', '*', '?', '[', ']', '~', '#', '!', '\0', '\e'
+    ]
+
+    # Subcommand-driven tools where argv[1] is a discrete operation mode
+    SUBCOMMAND_BINARIES = Set{
+      "git", "cargo", "npm", "pnpm", "yarn", "crystal", "docker", "podman", "kubectl", "helm"
+    }
+
+    # High-risk flags that unconditionally force interactive confirmation
+    DENYLISTED_EXACT_FLAGS = Set{
+      "-c", "-e", "-E", "-C",
+      "--config", "--upload-pack", "--receive-pack",
+      "-exec", "-execdir", "-ok", "-okdir"
+    }
 
     def initialize(@allowlist_path : String? = nil)
       @session_exact = Set(String).new
@@ -50,12 +65,14 @@ module Nightmare::Tools
         elsif ch == '"' && !in_single_quote
           in_double_quote = !in_double_quote
           has_token = true
-        elsif ch.whitespace? && !in_single_quote && !in_double_quote
+        elsif (ch == ' ' || ch == '\t') && !in_single_quote && !in_double_quote
           if has_token
             tokens << current.to_s
             current = String::Builder.new
             has_token = false
           end
+        elsif (ch == '\r' || ch == '\n' || ch.whitespace? || ch.control?) && !in_single_quote && !in_double_quote
+          raise ArgumentError.new("Invalid command syntax: control or non-standard whitespace character")
         else
           current << ch
           has_token = true
@@ -76,36 +93,57 @@ module Nightmare::Tools
     end
 
     # Flag denylist: forces modal confirmation regardless of allowlist state (§4.2)
-    # Checks: -c, -e, --exec*, --eval*, -C, --config, --upload-pack, --receive-pack,
-    # and any token containing '=' before the first non-flag argument (e.g. ENV=var).
+    # Checks: -c, -e, -E, -C, --exec*, --eval*, --config*, --upload-pack*, --receive-pack*,
+    # -exec*, -ok*, attached options (-Cdir, -cCMD), bundled flags (-ec, -ne),
+    # and any token containing '=' before the first non-flag argument or env assignments.
     def self.has_denylisted_flags?(argv : Array(String)) : Bool
       return false if argv.empty?
 
-      seen_non_flag = false
+      binary = File.basename(argv[0])
+      is_env_wrapper = (binary == "env")
+      seen_target_binary = false
 
       argv.each_with_index do |token, idx|
-        # Any token with '=' before first command binary or as first arg is an env injection
-        if !seen_non_flag && token.includes?('=')
-          return true
-        end
-
-        # Basename of the binary
         if idx == 0
-          seen_non_flag = true unless token.starts_with?('-')
+          return true if token.includes?('=')
           next
         end
 
-        seen_non_flag = true unless token.starts_with?('-')
-
-        # Flag checks
-        case token
-        when "-c", "-e", "-C", "--config", "--upload-pack", "--receive-pack"
-          return true
-        else
-          if token.starts_with?("--exec") || token.starts_with?("--eval")
+        if is_env_wrapper && !seen_target_binary
+          if token.includes?('=')
             return true
+          elsif !token.starts_with?('-')
+            seen_target_binary = true
           end
-          if token.starts_with?("-c=") || token.starts_with?("-C=") || token.starts_with?("--config=")
+        elsif !seen_target_binary && token.includes?('=')
+          return true
+        end
+
+        if !token.starts_with?('-')
+          seen_target_binary = true
+          next
+        end
+
+        # Check exact denylisted flags
+        return true if DENYLISTED_EXACT_FLAGS.includes?(token)
+
+        # Check long flag prefixes
+        if token.starts_with?("--exec") || token.starts_with?("--eval") ||
+           token.starts_with?("--config=") || token.starts_with?("--upload-pack=") ||
+           token.starts_with?("--receive-pack=") || token.starts_with?("--checkpoint-action=") ||
+           token.starts_with?("--to-command=")
+          return true
+        end
+
+        # Check short options with attached values (-c..., -C..., -e..., -E...)
+        if token.starts_with?("-c") || token.starts_with?("-C") || token.starts_with?("-e") || token.starts_with?("-E")
+          return true
+        end
+
+        # Check bundled short flags (e.g. -xvzc where 'c' or 'e' or 'E' or 'C' is bundled in a flag string like -ne, -ec)
+        if token.starts_with?('-') && !token.starts_with?("--")
+          chars = token[1..].chars
+          if chars.includes?('c') || chars.includes?('e') || chars.includes?('E') || chars.includes?('C')
             return true
           end
         end
@@ -123,14 +161,15 @@ module Nightmare::Tools
       return true if @persistent_patterns.any? { |re| exact_key =~ re }
 
       binary = File.basename(argv[0])
-      prefix_key = if argv.size > 1 && !argv[1].starts_with?('-')
-        "#{binary} #{argv[1]}"
-      else
-        binary
-      end
 
-      return true if @session_prefix.includes?(prefix_key) || @persistent_prefix.includes?(prefix_key)
+      # 1. Exact binary prefix (e.g. "sleep", "ls", "python3")
       return true if @session_prefix.includes?(binary) || @persistent_prefix.includes?(binary)
+
+      # 2. Subcommand prefix (e.g. "git status", "crystal spec")
+      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
+        subcommand_key = "#{binary} #{argv[1]}"
+        return true if @session_prefix.includes?(subcommand_key) || @persistent_prefix.includes?(subcommand_key)
+      end
 
       false
     end
@@ -158,25 +197,30 @@ module Nightmare::Tools
     def allow_session_prefix(argv : Array(String)) : Nil
       return if argv.empty?
       binary = File.basename(argv[0])
-      prefix = if argv.size > 1 && !argv[1].starts_with?('-')
-        "#{binary} #{argv[1]}"
+
+      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
+        @session_prefix.add("#{binary} #{argv[1]}")
+      elsif argv.size == 1
+        @session_prefix.add(binary)
       else
-        binary
+        allow_session_exact(argv)
       end
-      @session_prefix.add(prefix)
     end
 
     # Persists a prefix or exact command to $XDG_CONFIG_HOME/.../allow
     def allow_persist_prefix(argv : Array(String)) : Nil
       return if argv.empty?
       binary = File.basename(argv[0])
-      prefix = if argv.size > 1 && !argv[1].starts_with?('-')
-        "#{binary} #{argv[1]}"
+
+      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
+        @persistent_prefix.add("#{binary} #{argv[1]}")
+        save_persistent
+      elsif argv.size == 1
+        @persistent_prefix.add(binary)
+        save_persistent
       else
-        binary
+        allow_persist_exact(argv)
       end
-      @persistent_prefix.add(prefix)
-      save_persistent
     end
 
     private def load_persistent : Nil
@@ -204,14 +248,25 @@ module Nightmare::Tools
       path = @allowlist_path
       return unless path
 
-      Dir.mkdir_p(File.dirname(path))
-      File.open(path, "w") do |f|
-        @persistent_prefix.each do |p|
-          f.puts "prefix:#{p}"
+      dir = File.dirname(path)
+      Dir.mkdir_p(dir)
+
+      tmp_path = "#{path}.tmp.#{Process.pid}"
+      begin
+        File.open(tmp_path, "w") do |f|
+          @persistent_prefix.each do |p|
+            f.puts "prefix:#{p}"
+          end
+          @persistent_exact.each do |e|
+            f.puts e
+          end
+          @persistent_patterns.each do |re|
+            f.puts re.source
+          end
         end
-        @persistent_exact.each do |e|
-          f.puts e
-        end
+        File.rename(tmp_path, path)
+      ensure
+        File.delete(tmp_path) rescue nil if File.exists?(tmp_path)
       end
     end
   end

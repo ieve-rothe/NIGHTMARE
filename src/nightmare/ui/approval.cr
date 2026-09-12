@@ -46,9 +46,13 @@ module Nightmare::UI
       header_title = "#{Salamander::UI::Theme.title_active}⚡ SECURITY GATEWAY // SHELL EXECUTION#{Salamander::UI::Theme::RESET}"
       header_badge = "#{Salamander::UI::Theme.token_badge}#{timeout_seconds}s timeout#{Salamander::UI::Theme::RESET}"
 
+      sanitized_cmd = command.gsub('\r', "\\r").gsub('\e', "\\e")
+      sanitized_argv = argv.map { |a| a.gsub('\r', "\\r").gsub('\e', "\\e") }
+
       @output.puts
       @output.puts panel.render_header(header_title, header_badge, border, Salamander::UI::BoxStyle::Armored)
-      @output.puts panel.render_row("Command: #{command}", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Command: #{sanitized_cmd}", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Argv:    #{sanitized_argv.join(" ")}", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Cwd:     #{@root}", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Timeout: #{timeout_seconds}s", border, Salamander::UI::BoxStyle::Armored)
       if has_metachar

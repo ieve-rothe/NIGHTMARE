@@ -101,12 +101,7 @@ module Nightmare::Tools
             when ApprovalOutcome::Edit
               if edited = edit_value
                 cmd_to_run = edited
-                edited_argv = begin
-                  Allowlist.tokenize(cmd_to_run)
-                rescue ex
-                  return {error: "Tokenization error: #{ex.message}"}.to_json
-                end
-                return execute_process_group(cmd_to_run, edited_argv, effective_timeout_sec)
+                next
               else
                 return "[Execution rejected by user]"
               end
@@ -134,22 +129,28 @@ module Nightmare::Tools
         Config::DEFAULT_COMMAND_TIMEOUT
       end
 
-      # Environment per ARCHITECTURE_R3 §4.3
+      # Environment per ARCHITECTURE_R3 §4.3 & Security Hardening (VULN-01)
+      # clear_env: true prevents parent process API keys and secrets from leaking into child processes.
       env = {
+        "PATH"                => ENV["PATH"]? || "/usr/local/bin:/usr/bin:/bin",
+        "HOME"                => ENV["HOME"]? || "/root",
+        "USER"                => ENV["USER"]? || "user",
         "GIT_TERMINAL_PROMPT" => "0",
         "CI"                  => "1",
         "PAGER"               => "cat",
         "GIT_PAGER"           => "cat",
         "NO_COLOR"            => "1",
-        "TERM"                => "dumb"
+        "TERM"                => "dumb",
+        "TMPDIR"              => ENV["TMPDIR"]? || "/tmp"
       }
 
+      # Launch via direct argv (ARCHITECTURE_R3 §4.2)
       # Launch under setsid -w to establish independent session & process group
       has_setsid = File.exists?("/usr/bin/setsid") || File.exists?("/bin/setsid")
       setsid_bin = File.exists?("/usr/bin/setsid") ? "/usr/bin/setsid" : "/bin/setsid"
 
-      executable = has_setsid ? setsid_bin : "/bin/bash"
-      cmd_args = has_setsid ? ["-w", "/bin/bash", "-c", command_string] : ["-c", command_string]
+      executable = has_setsid ? setsid_bin : argv[0]
+      cmd_args = has_setsid ? (["-w", argv[0]] + argv[1..]) : argv[1..]
 
       dev_null = File.open("/dev/null", "r")
 
@@ -159,6 +160,7 @@ module Nightmare::Tools
           args: cmd_args,
           chdir: @guard.root,
           env: env,
+          clear_env: true,
           input: dev_null,
           output: Process::Redirect::Pipe,
           error: Process::Redirect::Pipe
@@ -206,8 +208,18 @@ module Nightmare::Tools
           final_status = terminate_process_group(pgid, exit_status_channel)
         end
 
-        stdout_done.receive rescue nil
-        stderr_done.receive rescue nil
+        # Drain output streams with grace period, then force-close to prevent grandchild pipe deadlocks (VULN-07)
+        select
+        when stdout_done.receive
+        when timeout(100.milliseconds)
+          process.output.close rescue nil
+        end
+
+        select
+        when stderr_done.receive
+        when timeout(100.milliseconds)
+          process.error.close rescue nil
+        end
 
         if timed_out
           return "[Execution timed out after #{timeout.total_seconds.to_i} seconds]"
@@ -235,6 +247,9 @@ module Nightmare::Tools
           end
         end
       ensure
+        process.output.close rescue nil
+        process.error.close rescue nil
+
         duration_ms = (Time.instant - start_time).total_milliseconds.to_i64
         exit_code = if (st = final_status) && st.normal_exit?
                       st.exit_code
@@ -281,37 +296,40 @@ module Nightmare::Tools
     end
 
     private def terminate_process_group(pgid : Int64, exit_status_channel : Channel(Process::Status)? = nil) : Process::Status?
-      # Termination ladder: SIGTERM -> grace -> SIGKILL to -pgid (T9 / §4.3)
+      # Termination ladder: SIGTERM -> grace -> SIGKILL to -pgid (T9 / §4.3 / VULN-06)
       begin
         LibC.kill(-pgid.to_i32, Signal::TERM.value)
       rescue
       end
 
+      st : Process::Status? = nil
       # Wait for child to exit on SIGTERM up to grace period
       if ch = exit_status_channel
         select
-        when st = ch.receive
-          return st
+        when s = ch.receive
+          st = s
         when timeout(Config::PROCESS_GRACE_PERIOD)
         end
       else
-        sleep 50.milliseconds
+        sleep Config::PROCESS_GRACE_PERIOD
       end
 
+      # Always send SIGKILL to the process group to ensure any descendants ignoring SIGTERM are eliminated
       begin
         LibC.kill(-pgid.to_i32, Signal::KILL.value)
       rescue
       end
 
       if ch = exit_status_channel
-        select
-        when st = ch.receive
-          return st
-        when timeout(200.milliseconds)
-          return nil
+        if st.nil?
+          select
+          when s = ch.receive
+            st = s
+          when timeout(200.milliseconds)
+          end
         end
       end
-      nil
+      st
     end
   end
 end
