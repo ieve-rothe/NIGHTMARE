@@ -2,6 +2,7 @@ require "digest/sha256"
 require "file_utils"
 require "path"
 require "../exceptions"
+require "../settings"
 require "./manifest"
 
 module Nightmare::Workspace
@@ -22,6 +23,7 @@ module Nightmare::Workspace
     getter global_prompt_path : String
     getter repo_prompt_path : String
     getter manifest : Manifest
+    getter settings : Settings
 
     def workspace_config_dir : String
       @config_dir
@@ -76,6 +78,8 @@ module Nightmare::Workspace
       else
         @manifest = Manifest.new(id: @workspace_id, canonical_path: @root)
       end
+
+      @settings = Settings.load_or_bootstrap(@config_dir, @global_config_dir, ensure_dirs: ensure_dirs)
     end
 
     def self.resolve(
@@ -182,54 +186,20 @@ module Nightmare::Workspace
 
     def resolve_model(cli_override : String? = nil) : String
       return cli_override if cli_override && !cli_override.empty?
-
-      # 1. Workspace config: ~/.config/nightmare/workspaces/<id>/config.json
-      ws_cfg = File.join(@config_dir, "config.json")
-      if File.exists?(ws_cfg)
-        if m = read_json_key(ws_cfg, "model")
-          return m
-        end
-      end
-
-      # 2. Global config: ~/.config/nightmare/config.json
-      global_cfg = File.join(@global_config_dir, "config.json")
-      if File.exists?(global_cfg)
-        if m = read_json_key(global_cfg, "model")
-          return m
-        end
-      end
-
-      Config::DEFAULT_MODEL
+      @settings.model
     end
 
     def resolve_api_url : String
       if env_url = ENV["MANTLE_API_URL"]? || ENV["OLLAMA_API_URL"]?
         return env_url unless env_url.empty?
       end
-
-      ws_cfg = File.join(@config_dir, "config.json")
-      if File.exists?(ws_cfg)
-        if u = read_json_key(ws_cfg, "api_url")
-          return u
-        end
-      end
-
-      global_cfg = File.join(@global_config_dir, "config.json")
-      if File.exists?(global_cfg)
-        if u = read_json_key(global_cfg, "api_url")
-          return u
-        end
-      end
-
-      "http://127.0.0.1:11434/api/chat"
+      @settings.api_url
     end
 
-    private def read_json_key(path : String, key : String) : String?
-      content = File.read(path)
-      parsed = JSON.parse(content)
-      parsed[key]?.try(&.as_s?)
-    rescue
-      nil
+    def resolve_markdown_formatting(cli_override : Bool? = nil) : Bool
+      return cli_override unless cli_override.nil?
+      return false if ENV.has_key?("NO_COLOR")
+      @settings.markdown
     end
 
     private def resolve_xdg(env_var : String, param : String?, fallback : String) : String

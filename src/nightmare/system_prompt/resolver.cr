@@ -1,6 +1,6 @@
 require "../workspace/environment"
 
-module Nightmare::Directives
+module Nightmare::SystemPrompt
   enum Source
     CliFlag
     RepoOverride
@@ -49,7 +49,7 @@ module Nightmare::Directives
   end
 
   class Resolver
-    DEFAULT_PERSONA = Nightmare::Directives::DEFAULT_PERSONA
+    DEFAULT_PERSONA = Nightmare::SystemPrompt::DEFAULT_PERSONA
 
     def self.resolve(env : Workspace::Environment, cli_override : String? = nil) : String
       resolve_with_source(env, cli_override).text
@@ -60,7 +60,7 @@ module Nightmare::Directives
       if cli_override && !cli_override.strip.empty?
         resolved_path = File.expand_path(cli_override, env.root)
         unless File.file?(resolved_path)
-          raise ArgumentError.new("System directive file not found: #{cli_override} (resolved to #{resolved_path})")
+          raise ArgumentError.new("System prompt file not found: #{cli_override} (resolved to #{resolved_path})")
         end
         content = File.read(resolved_path)
         return ResolutionResult.new(
@@ -117,16 +117,16 @@ module Nightmare::Directives
       )
     end
 
-    def self.resolve_manager(env : Workspace::Environment, cli_override : String? = nil) : DirectiveBuffer
+    def self.resolve_manager(env : Workspace::Environment, cli_override : String? = nil) : SystemPromptBuffer
       result = resolve_with_source(env, cli_override)
-      DirectiveBuffer.new(
+      SystemPromptBuffer.new(
         current_text: result.text,
         source: result.source,
         source_path: result.path
       )
     end
 
-    def self.from_environment(env : Workspace::Environment, cli_override : String? = nil) : DirectiveBuffer
+    def self.from_environment(env : Workspace::Environment, cli_override : String? = nil) : SystemPromptBuffer
       resolve_manager(env, cli_override)
     end
 
@@ -143,37 +143,37 @@ module Nightmare::Directives
     end
   end
 
-  class DirectiveBuffer
+  class SystemPromptBuffer
     property current_text : String
-    getter original_directive : String
+    getter original_prompt : String
     getter source : Source
     getter source_path : String?
 
     def initialize(@current_text : String, @source : Source = Source::DefaultPersona, @source_path : String? = nil)
-      @original_directive = @current_text
+      @original_prompt = @current_text
     end
 
-    def active_directive : String
+    def active_prompt : String
       @current_text
     end
 
-    def active_directive=(val : String) : Nil
+    def active_prompt=(val : String) : Nil
       @current_text = val
     end
 
     def modified? : Bool
-      @current_text != @original_directive
+      @current_text != @original_prompt
     end
 
-    def update(new_directive : String) : Nil
-      @current_text = new_directive
+    def update(new_prompt : String) : Nil
+      @current_text = new_prompt
     end
 
     def reset! : Nil
-      @current_text = @original_directive
+      @current_text = @original_prompt
     end
 
-    def self.from_environment(env : Workspace::Environment, cli_override : String? = nil) : DirectiveBuffer
+    def self.from_environment(env : Workspace::Environment, cli_override : String? = nil) : SystemPromptBuffer
       Resolver.resolve_manager(env, cli_override)
     end
 
@@ -208,13 +208,13 @@ module Nightmare::Directives
 
         if status.success?
           unless File.exists?(temp_path)
-            io_err.puts "Warning: Edited temporary file was removed. Retaining previous directive."
+            io_err.puts "Warning: Edited temporary file was removed. Retaining previous system prompt."
             return false
           end
 
           edited_content = File.read(temp_path).strip
           if edited_content.empty?
-            io_err.puts "Warning: Edited directive was empty. Retaining previous directive."
+            io_err.puts "Warning: Edited system prompt was empty. Retaining previous system prompt."
             return false
           end
 
@@ -222,11 +222,11 @@ module Nightmare::Directives
           true
         else
           status_desc = status.normal_exit? ? status.exit_code.to_s : "signal #{status.exit_signal? || "UNKNOWN"}"
-          io_err.puts "Notice: Editor exited with non-zero status (#{status_desc}). In-memory directive unchanged."
+          io_err.puts "Notice: Editor exited with non-zero status (#{status_desc}). In-memory system prompt unchanged."
           false
         end
       rescue ex : Exception
-        io_err.puts "Warning: Error during editor execution: #{ex.message}. In-memory directive unchanged."
+        io_err.puts "Warning: Error during editor execution: #{ex.message}. In-memory system prompt unchanged."
         false
       ensure
         File.delete(temp_path) if File.exists?(temp_path)
@@ -258,5 +258,5 @@ module Nightmare::Directives
     end
   end
 
-  alias Manager = DirectiveBuffer
+  alias Manager = SystemPromptBuffer
 end

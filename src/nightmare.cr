@@ -3,9 +3,10 @@ require "mantle"
 require "salamander"
 require "./nightmare/exceptions"
 require "./nightmare/config"
+require "./nightmare/settings"
 require "./nightmare/workspace/manifest"
 require "./nightmare/workspace/environment"
-require "./nightmare/directives/resolver"
+require "./nightmare/system_prompt/resolver"
 require "./nightmare/harness/types"
 require "./nightmare/harness/loop_detector"
 require "./nightmare/harness/retrier"
@@ -35,6 +36,7 @@ module Nightmare
       property system_prompt_path : String? = nil
       property no_log : Bool = false
       property model : String? = nil
+      property markdown : Bool? = nil
       property target_dir : String = Dir.current
       property show_help : Bool = false
       property show_version : Bool = false
@@ -58,6 +60,14 @@ module Nightmare
 
           opts.on("-m MODEL", "--model=MODEL", "Select model provider or alias") do |model|
             options.model = model
+          end
+
+          opts.on("--markdown", "Enable ANSI markdown formatting in terminal (default)") do
+            options.markdown = true
+          end
+
+          opts.on("--no-markdown", "Disable ANSI markdown formatting in terminal") do
+            options.markdown = false
           end
 
           opts.on("-v", "--version", "Show NIGHTMARE version") do
@@ -91,6 +101,8 @@ module Nightmare
             p.on("-s PATH", "--system=PATH", "Path to custom system prompt file") { }
             p.on("--no-log", "Disable LLM audit call logging") { }
             p.on("-m MODEL", "--model=MODEL", "Select model provider or alias") { }
+            p.on("--markdown", "Enable ANSI markdown formatting in terminal") { }
+            p.on("--no-markdown", "Disable ANSI markdown formatting in terminal") { }
             p.on("-v", "--version", "Show NIGHTMARE version") { }
             p.on("-h", "--help", "Show help information") { }
           end
@@ -124,7 +136,8 @@ module Nightmare
           env: env,
           system_prompt_path: options.system_prompt_path,
           model_override: options.model,
-          no_log: options.no_log
+          no_log: options.no_log,
+          markdown_override: options.markdown
         )
         repl.start
       rescue ex : SecurityError

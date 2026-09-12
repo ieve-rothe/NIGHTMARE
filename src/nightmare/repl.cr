@@ -5,9 +5,10 @@
 require "json"
 require "uuid"
 require "mantle"
+require "salamander"
 require "./config"
 require "./workspace/environment"
-require "./directives/resolver"
+require "./system_prompt/resolver"
 require "./tools/guard"
 require "./tools/allowlist"
 require "./tools/registry"
@@ -41,6 +42,7 @@ module Nightmare
     getter router : Commands::Router
     getter model_name : String
     getter? no_log : Bool
+    getter? markdown_formatting : Bool
 
     @interrupted_effects : Array(String) = [] of String
 
@@ -48,10 +50,13 @@ module Nightmare
       @env : Workspace::Environment,
       system_prompt_path : String? = nil,
       model_override : String? = nil,
-      @no_log : Bool = false
+      @no_log : Bool = false,
+      markdown_override : Bool? = nil
     )
-      # 1. Directives resolution
-      directive = Directives::Resolver.resolve(@env, system_prompt_path)
+      @markdown_formatting = @env.resolve_markdown_formatting(markdown_override)
+
+      # 1. System prompt resolution
+      prompt = SystemPrompt::Resolver.resolve(@env, system_prompt_path)
       @model_name = @env.resolve_model(model_override)
 
       # 2. Persisted calibrator
@@ -75,9 +80,9 @@ module Nightmare
       model_config = Mantle::Clients::ModelConfig.new(
         model_name: @model_name,
         stream: true,
-        temperature: 0.2,
-        top_p: 0.95,
-        max_tokens: 4096,
+        temperature: @env.settings.temperature,
+        top_p: @env.settings.top_p,
+        max_tokens: @env.settings.max_tokens,
         api_url: api_url
       )
       raw_client = Mantle::Clients::OllamaClient.new(model_config)
@@ -112,7 +117,7 @@ module Nightmare
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       on_model = ->(new_model : String) {
         @model_name = new_model
-        client.model_name = new_model
+        raw_client.model_name = new_model
       }
       @router = Commands::Router.new(
         store: @store,
@@ -121,7 +126,7 @@ module Nightmare
         guard: @guard,
         env: @env,
         transcript: @transcript,
-        current_prompt: directive,
+        current_prompt: prompt,
         current_model: @model_name,
         on_model_change: on_model
       )
@@ -187,7 +192,7 @@ module Nightmare
       turn_sequence_id = UUID.random.to_s
       outcome = Mantle::LogContext.with_sequence_id(turn_sequence_id) do
         @step_runner.run_turn(
-          directive: @router.current_prompt,
+          system_prompt: @router.current_prompt,
           pinned_block: pinned_block
         ) do |chunk|
           @stream_ctrl.process_chunk(chunk)
@@ -200,14 +205,24 @@ module Nightmare
       @router.last_thinking = @stream_ctrl.thinking_text || outcome.thinking
 
       if outcome.ok?
-        # If streaming didn't output visible text, output value
         val = outcome.value.not_nil!
-        if @stream_ctrl.visible_text.empty? && !val.empty?
-          puts val
+        if @markdown_formatting && STDOUT.tty?
+          if !@stream_ctrl.visible_text.empty?
+            Salamander::UI.clear_and_reposition(@stream_ctrl.visible_text)
+            puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
+          elsif !val.empty?
+            puts Salamander::UI::MarkdownFormatter.format(val)
+          end
           STDOUT.flush
         else
-          puts unless @stream_ctrl.visible_text.ends_with?('\n')
-          STDOUT.flush
+          # If streaming didn't output visible text, output value
+          if @stream_ctrl.visible_text.empty? && !val.empty?
+            puts val
+            STDOUT.flush
+          else
+            puts unless @stream_ctrl.visible_text.ends_with?('\n')
+            STDOUT.flush
+          end
         end
 
         # Calibrate tokens

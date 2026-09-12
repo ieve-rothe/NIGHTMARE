@@ -28,7 +28,7 @@ session.wait_for("timed out", timeout: 5.seconds)
 crystal spec
 
 # Unit tests only (~4 seconds, compile-dominated)
-crystal spec spec/nightmare_spec.cr spec/directives_spec.cr spec/workspace_spec.cr spec/empirical_directives_spec.cr
+crystal spec spec/nightmare_spec.cr spec/system_prompt_spec.cr spec/workspace_spec.cr spec/empirical_system_prompt_spec.cr
 ```
 
 ### Test Structure
@@ -37,9 +37,9 @@ crystal spec spec/nightmare_spec.cr spec/directives_spec.cr spec/workspace_spec.
 spec/
 ├── spec_helper.cr              # Shared test utilities
 ├── nightmare_spec.cr           # Core module unit tests
-├── directives_spec.cr          # Directive resolution unit tests
+├── system_prompt_spec.cr       # System prompt resolution unit tests
 ├── workspace_spec.cr           # Workspace/env unit tests
-├── empirical_directives_spec.cr # Exhaustive directive edge cases
+├── empirical_system_prompt_spec.cr # Exhaustive system prompt edge cases
 └── e2e/
     ├── test_runner.cr           # E2E harness (sandbox, mock LLM, process session)
     ├── test_runner_spec.cr      # Tests for the harness itself

@@ -79,20 +79,20 @@ module Nightmare::Context
     end
 
     # Assembles wire-format messages in strict order:
-    # 1. System directive
+    # 1. System prompt
     # 2. Pinned files block
     # 3. Completed historical turns splatted in order
     # 4. Active in-flight turn messages
-    def assemble_messages(directive : String? = nil, pinned_block : String? = nil) : Array(Mantle::Message)
+    def assemble_messages(system_prompt : String? = nil, pinned_block : String? = nil) : Array(Mantle::Message)
       result = [] of Mantle::Message
 
-      has_dir = directive && !directive.empty?
+      has_prompt = system_prompt && !system_prompt.empty?
       has_pinned = pinned_block && !pinned_block.empty?
 
-      if has_dir && has_pinned
-        result << Mantle::Message.new("system", "#{directive}\n\n#{pinned_block}")
-      elsif has_dir
-        result << Mantle::Message.new("system", directive)
+      if has_prompt && has_pinned
+        result << Mantle::Message.new("system", "#{system_prompt}\n\n#{pinned_block}")
+      elsif has_prompt
+        result << Mantle::Message.new("system", system_prompt)
       elsif has_pinned
         result << Mantle::Message.new("system", pinned_block)
       end
@@ -109,14 +109,14 @@ module Nightmare::Context
     end
 
     # Calculates total characters across all assembled messages
-    def total_characters(directive : String? = nil, pinned_block : String? = nil) : Int32
-      msgs = assemble_messages(directive, pinned_block)
+    def total_characters(system_prompt : String? = nil, pinned_block : String? = nil) : Int32
+      msgs = assemble_messages(system_prompt, pinned_block)
       msgs.sum { |m| (m.content || "").size }
     end
 
     # Estimates total tokens across all assembled messages using the calibrator
-    def total_estimated_tokens(calibrator : TokenEstimator, directive : String? = nil, pinned_block : String? = nil) : Int32
-      calibrator.estimate(total_characters(directive, pinned_block))
+    def total_estimated_tokens(calibrator : TokenEstimator, system_prompt : String? = nil, pinned_block : String? = nil) : Int32
+      calibrator.estimate(total_characters(system_prompt, pinned_block))
     end
 
     # Asserts that all history turns and active turn (if any) satisfy pair integrity

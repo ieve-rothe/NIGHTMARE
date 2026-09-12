@@ -30,22 +30,22 @@ module Nightmare::Harness
 
     # Executes a full conversational turn through Mantle::Step with in-turn shedding and typed boundaries
     def run_turn(
-      directive : String? = nil,
+      system_prompt : String? = nil,
       pinned_block : String? = nil,
       &stream_callback : String -> Nil
     ) : TurnOutcome
       @retrier.execute do
-        execute_turn_attempt(directive, pinned_block, &stream_callback)
+        execute_turn_attempt(system_prompt, pinned_block, &stream_callback)
       end
     end
 
     # Overload for synchronous execution without stream block
-    def run_turn(directive : String? = nil, pinned_block : String? = nil) : TurnOutcome
-      run_turn(directive, pinned_block) { |_| }
+    def run_turn(system_prompt : String? = nil, pinned_block : String? = nil) : TurnOutcome
+      run_turn(system_prompt, pinned_block) { |_| }
     end
 
     private def execute_turn_attempt(
-      directive : String?,
+      system_prompt : String?,
       pinned_block : String?,
       &stream_callback : String -> Nil
     ) : TurnOutcome
@@ -80,7 +80,7 @@ module Nightmare::Harness
       }
 
       loop do
-        messages = @tool_loop.store.assemble_messages(directive, pinned_block)
+        messages = @tool_loop.store.assemble_messages(system_prompt, pinned_block)
 
         step = Mantle::Step.new(
           client: @client,

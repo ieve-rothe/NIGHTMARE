@@ -237,8 +237,8 @@ describe "Tier 1: Feature Coverage (Opaque-Box E2E)" do
     end
   end
 
-  # 5. Directives Precedence & Resolution
-  describe "Feature 5: System Directives Precedence (F1.6, F1.8)" do
+  # 5. System Prompt Precedence & Resolution
+  describe "Feature 5: System Prompt Precedence (F1.6, F1.8)" do
     it "TC-T1-F05-01: uses default general persona when no custom prompt is provided" do
       Nightmare::E2E.require_repl!
       Nightmare::E2E.with_sandbox do |sandbox|

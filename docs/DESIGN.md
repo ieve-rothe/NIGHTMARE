@@ -83,7 +83,7 @@ No character personas, no homeostatic drives, no background schedulers, no topic
 
 Authoritative statement of requirements. `.agents/ORIGINAL_REQUEST.md` holds the original user phrasing and acceptance criteria.
 
-**R1 — Workspace anchoring and central XDG mapping.** Anchor to the realpath of `Dir.current`; prevent all operations outside it. Persist config, state, and cache in central XDG directories keyed by a deterministic per-workspace identifier. Never write inside the target repo. Print a startup banner showing root, config, and state paths. Resolve system directives in strict precedence: CLI flag → repo override → workspace config → global config → default persona.
+**R1 — Workspace anchoring and central XDG mapping.** Anchor to the realpath of `Dir.current`; prevent all operations outside it. Persist config, state, and cache in central XDG directories keyed by a deterministic per-workspace identifier. Never write inside the target repo. Print a startup banner showing root, config, and state paths. Resolve system prompt in strict precedence: CLI flag → repo override → workspace config → global config → default persona.
 
 **R2 — Ephemeral context engine, turn-unit pruning, in-turn shedding.** Keep context in memory as an atomic turn-unit sliding window. Pruning must never orphan a tool pair and never evict the active turn's user prompt. When approaching token limits during multi-step tool iterations, compress older consumed tool results within the active turn while preserving the most recent verbatim. Self-calibrate token estimation from provider usage feedback. Maintain a parallel un-pruned transcript for `/save`.
 
@@ -109,7 +109,7 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 
 **Startup.** A bordered banner reporting workspace root, config path, and state path — so it is always obvious which workspace is active and that nothing is being written into the repo.
 
-**Directives.** The active system prompt resolves by precedence and is reported on request. `/prompt edit` opens `$EDITOR` and changes the directive **in memory only**; no file on disk is modified. Directive files inside the repo are readable but never writable by the agent.
+**System Prompt.** The active system prompt resolves by precedence and is reported on request. `/prompt edit` opens `$EDITOR` and changes the system prompt **in memory only**; no file on disk is modified. System prompt files inside the repo are readable but never writable by the agent.
 
 **Working memory meter.** Displays calibrated estimates with a tilde, plus turn count and pinned-file cost. Estimates are labelled as estimates because they are.
 
@@ -129,10 +129,10 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 | :--- | :--- |
 | `/add <path> [--lines S-E]` | Pin a file (or line range) into the live working set |
 | `/drop [path]` | Unpin one file, or all if omitted |
-| `/clear` | Wipe the conversational window; pinned files and directive survive |
+| `/clear` | Wipe the conversational window; pinned files and system prompt survive |
 | `/cls` | Clear the physical terminal screen |
 | `/save [path]` | Export the pristine, un-pruned transcript as Markdown |
-| `/prompt [edit]` | Show the active directive; `edit` opens `$EDITOR`, in memory only |
+| `/prompt [edit]` | Show the active system prompt; `edit` opens `$EDITOR`, in memory only |
 | `/review` | Show the exact prompt assembly currently dispatched to the model |
 | `/thinking` | Show the hidden reasoning block from the last turn |
 | `/model [name]` | Show or switch the active Ollama model |
@@ -146,7 +146,7 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 
 ### In scope for v1
 
-1. **Core runtime and XDG mapping** — canonical root, per-workspace XDG partitioning, startup banner, directive precedence.
+1. **Core runtime and XDG mapping** — canonical root, per-workspace XDG partitioning, startup banner, system prompt precedence.
 2. **Context engine** — turn-unit pruning, in-turn shedding, self-calibrating token meter. No long-term memory store.
 3. **Pristine transcript** — parallel un-pruned history, exported via `/save`, durable against a crash.
 4. **Read-only tools** — `list_files`, `search`, `read_file`, `file_info`; autonomous, root-contained, sensitive patterns excluded.

@@ -95,7 +95,7 @@ describe "Tier 3: Cross-Feature Combinations (Pairwise Opaque-Box E2E)" do
     end
   end
 
-  it "TC-T3-CB-04: [/prompt edit In-Memory x Directives Precedence] in-memory edit overrides disk prompt without modifying disk file" do
+  it "TC-T3-CB-04: [/prompt edit In-Memory x System Prompt Precedence] in-memory edit overrides disk prompt without modifying disk file" do
     Nightmare::E2E.require_repl!
     Nightmare::E2E.with_sandbox do |sandbox|
       sandbox.write_file(".nightmare/prompt.md", "DISK_COMMITTED_PROMPT")

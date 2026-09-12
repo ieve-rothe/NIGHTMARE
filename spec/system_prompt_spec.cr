@@ -1,24 +1,24 @@
 require "./spec_helper"
 
-describe Nightmare::Directives do
-  describe Nightmare::Directives::Resolver do
+describe Nightmare::SystemPrompt do
+  describe Nightmare::SystemPrompt::Resolver do
     it "resolves Tier 5 (Default General Persona) when no overrides exist" do
       with_temp_dir do |dir|
         with_temp_dir do |xdg|
           with_env({"XDG_CONFIG_HOME" => xdg, "XDG_STATE_HOME" => xdg, "XDG_CACHE_HOME" => xdg}) do
             env = Nightmare::Workspace::Environment.resolve(dir)
-            result = Nightmare::Directives::Resolver.resolve_with_source(env)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
 
-            result.source.should eq(Nightmare::Directives::Source::DefaultPersona)
+            result.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
             result.path.should be_nil
-            result.text.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            result.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
             result.text.should contain("You are an execution agent operating in the current working directory.")
             result.text.should contain("Prefer replace_in_file for edits; read before you write")
 
             # Destructuring tuple support
-            content, source = Nightmare::Directives::Resolver.resolve_with_source(env)
-            source.should eq(Nightmare::Directives::Source::DefaultPersona)
-            content.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            content, source = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
+            content.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
           end
         end
       end
@@ -33,8 +33,8 @@ describe Nightmare::Directives do
             Dir.mkdir_p(File.dirname(global_prompt))
             File.write(global_prompt, "Global custom persona.")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env)
-            result.source.should eq(Nightmare::Directives::Source::GlobalConfig)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            result.source.should eq(Nightmare::SystemPrompt::Source::GlobalConfig)
             result.path.should eq(global_prompt)
             result.text.should eq("Global custom persona.")
           end
@@ -51,8 +51,8 @@ describe Nightmare::Directives do
             File.write(env.global_prompt_path, "Global prompt.")
             File.write(env.workspace_prompt_path, "Workspace custom prompt.")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env)
-            result.source.should eq(Nightmare::Directives::Source::WorkspaceConfig)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            result.source.should eq(Nightmare::SystemPrompt::Source::WorkspaceConfig)
             result.path.should eq(env.workspace_prompt_path)
             result.text.should eq("Workspace custom prompt.")
           end
@@ -72,8 +72,8 @@ describe Nightmare::Directives do
             Dir.mkdir_p(File.dirname(env.repo_prompt_path))
             File.write(env.repo_prompt_path, "Repo committed prompt.")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env)
-            result.source.should eq(Nightmare::Directives::Source::RepoOverride)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            result.source.should eq(Nightmare::SystemPrompt::Source::RepoOverride)
             result.path.should eq(env.repo_prompt_path)
             result.text.should eq("Repo committed prompt.")
           end
@@ -92,8 +92,8 @@ describe Nightmare::Directives do
             cli_prompt_file = File.join(dir, "custom_cli_prompt.md")
             File.write(cli_prompt_file, "CLI forced prompt.")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env, cli_prompt_file)
-            result.source.should eq(Nightmare::Directives::Source::CliFlag)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, cli_prompt_file)
+            result.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
             result.path.should eq(cli_prompt_file)
             result.text.should eq("CLI forced prompt.")
           end
@@ -111,8 +111,8 @@ describe Nightmare::Directives do
             Dir.mkdir_p(File.dirname(abs_file))
             File.write(abs_file, "Relative path prompt.")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env, relative_file)
-            result.source.should eq(Nightmare::Directives::Source::CliFlag)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, relative_file)
+            result.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
             result.path.should eq(abs_file)
             result.text.should eq("Relative path prompt.")
           end
@@ -125,8 +125,8 @@ describe Nightmare::Directives do
         with_temp_dir do |xdg|
           with_env({"XDG_CONFIG_HOME" => xdg, "XDG_STATE_HOME" => xdg, "XDG_CACHE_HOME" => xdg}) do
             env = Nightmare::Workspace::Environment.resolve(dir)
-            expect_raises(ArgumentError, /System directive file not found/) do
-              Nightmare::Directives::Resolver.resolve(env, "non_existent_prompt.md")
+            expect_raises(ArgumentError, /System prompt file not found/) do
+              Nightmare::SystemPrompt::Resolver.resolve(env, "non_existent_prompt.md")
             end
           end
         end
@@ -144,8 +144,8 @@ describe Nightmare::Directives do
             Dir.mkdir_p(File.dirname(env.repo_prompt_path))
             File.write(env.repo_prompt_path, "   \n\t  \n")
 
-            result = Nightmare::Directives::Resolver.resolve_with_source(env)
-            result.source.should eq(Nightmare::Directives::Source::GlobalConfig)
+            result = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            result.source.should eq(Nightmare::SystemPrompt::Source::GlobalConfig)
             result.text.should eq("Global valid prompt.")
           end
         end
@@ -157,7 +157,7 @@ describe Nightmare::Directives do
         with_temp_dir do |xdg|
           with_env({"XDG_CONFIG_HOME" => xdg, "XDG_STATE_HOME" => xdg, "XDG_CACHE_HOME" => xdg}) do
             env = Nightmare::Workspace::Environment.resolve(dir)
-            Nightmare::Directives::Resolver.resolve(env)
+            Nightmare::SystemPrompt::Resolver.resolve(env)
 
             File.exists?(env.repo_prompt_path).should be_false
             Dir.exists?(File.join(dir, ".nightmare")).should be_false
@@ -167,32 +167,32 @@ describe Nightmare::Directives do
     end
   end
 
-  describe Nightmare::Directives::DirectiveBuffer do
-    it "initializes with active directive matching resolved original" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
-        current_text: "Initial directive",
-        source: Nightmare::Directives::Source::DefaultPersona
+  describe Nightmare::SystemPrompt::SystemPromptBuffer do
+    it "initializes with active prompt matching resolved original" do
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
+        current_text: "Initial prompt",
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
-      buffer.active_directive.should eq("Initial directive")
-      buffer.current_text.should eq("Initial directive")
-      buffer.original_directive.should eq("Initial directive")
+      buffer.active_prompt.should eq("Initial prompt")
+      buffer.current_text.should eq("Initial prompt")
+      buffer.original_prompt.should eq("Initial prompt")
       buffer.modified?.should be_false
     end
 
-    it "updates active directive in RAM without touching disk" do
+    it "updates active prompt in RAM without touching disk" do
       with_temp_dir do |dir|
         with_temp_dir do |xdg|
           with_env({"XDG_CONFIG_HOME" => xdg, "XDG_STATE_HOME" => xdg, "XDG_CACHE_HOME" => xdg}) do
             env = Nightmare::Workspace::Environment.resolve(dir)
             File.write(env.workspace_prompt_path, "Initial disk prompt")
 
-            buffer = Nightmare::Directives::DirectiveBuffer.from_environment(env)
-            buffer.active_directive.should eq("Initial disk prompt")
+            buffer = Nightmare::SystemPrompt::SystemPromptBuffer.from_environment(env)
+            buffer.active_prompt.should eq("Initial disk prompt")
 
             buffer.update("Mutated RAM-only prompt")
-            buffer.active_directive.should eq("Mutated RAM-only prompt")
-            buffer.original_directive.should eq("Initial disk prompt")
+            buffer.active_prompt.should eq("Mutated RAM-only prompt")
+            buffer.original_prompt.should eq("Initial disk prompt")
             buffer.modified?.should be_true
 
             # Disk file remains completely untouched
@@ -202,24 +202,24 @@ describe Nightmare::Directives do
       end
     end
 
-    it "resets active directive back to original" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+    it "resets active prompt back to original" do
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Original prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       buffer.update("Modified prompt")
       buffer.modified?.should be_true
 
       buffer.reset!
-      buffer.active_directive.should eq("Original prompt")
+      buffer.active_prompt.should eq("Original prompt")
       buffer.modified?.should be_false
     end
 
-    it "executes interactive edit on tempfile and updates directive on exit 0" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+    it "executes interactive edit on tempfile and updates prompt on exit 0" do
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Before edit",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       mock_editor = "sh -c 'echo \" After edit\" >> \"$1\"' --"
@@ -227,13 +227,13 @@ describe Nightmare::Directives do
 
       success.should be_true
       buffer.modified?.should be_true
-      buffer.active_directive.should eq("Before edit\n After edit")
+      buffer.active_prompt.should eq("Before edit\n After edit")
     end
 
     it "reverts to prior prompt if editor exits with non-zero error status" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Initial uncorrupted prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       mock_failing_editor = "sh -c 'exit 1' --"
@@ -242,14 +242,14 @@ describe Nightmare::Directives do
 
       success.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Initial uncorrupted prompt")
+      buffer.active_prompt.should eq("Initial uncorrupted prompt")
       err_io.to_s.should contain("Notice: Editor exited with non-zero status (1)")
     end
 
     it "safely handles abnormal editor exit caused by SIGKILL without raising exceptions" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Initial uncorrupted prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -258,16 +258,16 @@ describe Nightmare::Directives do
 
       success.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Initial uncorrupted prompt")
+      buffer.active_prompt.should eq("Initial uncorrupted prompt")
       buffer.current_text.should eq("Initial uncorrupted prompt")
       err_io.to_s.should contain("Notice: Editor exited with non-zero status")
       err_io.to_s.should contain("signal KILL")
     end
 
     it "safely handles abnormal editor exit caused by SIGTERM without raising exceptions" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Initial uncorrupted prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -276,16 +276,16 @@ describe Nightmare::Directives do
 
       success.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Initial uncorrupted prompt")
+      buffer.active_prompt.should eq("Initial uncorrupted prompt")
       buffer.current_text.should eq("Initial uncorrupted prompt")
       err_io.to_s.should contain("Notice: Editor exited with non-zero status")
       err_io.to_s.should contain("signal TERM")
     end
 
     it "safely handles missing temporary file if deleted by editor" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Initial uncorrupted prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -294,7 +294,7 @@ describe Nightmare::Directives do
 
       success.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Initial uncorrupted prompt")
+      buffer.active_prompt.should eq("Initial uncorrupted prompt")
       buffer.current_text.should eq("Initial uncorrupted prompt")
       err_io.to_s.should contain("Edited temporary file was removed")
     end
@@ -306,7 +306,7 @@ describe Nightmare::Directives do
             env = Nightmare::Workspace::Environment.resolve(dir)
             File.write(env.workspace_prompt_path, "Initial disk prompt")
 
-            buffer = Nightmare::Directives::DirectiveBuffer.from_environment(env)
+            buffer = Nightmare::SystemPrompt::SystemPromptBuffer.from_environment(env)
             buffer.current_text.should eq("Initial disk prompt")
 
             sed_editor = "sed -i 's/Initial disk/Mutated in-memory/'"

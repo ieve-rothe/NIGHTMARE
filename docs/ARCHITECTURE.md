@@ -14,7 +14,7 @@ CONOPS, tenets, requirements (R1–R6), operator-visible behaviour, the command 
 Nightmare
 ├── CLI                           # ARGV parsing, flag extraction, entrypoint
 ├── Workspace                     # Canonical root resolution, XDG directory mapping, banner
-├── Directives                    # Precedence resolution, in-memory editor buffer
+├── SystemPrompt                  # Precedence resolution, in-memory editor buffer
 ├── Context
 │   ├── SlidingStore              # In-memory turn-unit FIFO context store
 │   ├── Shedder                   # In-turn & historical tool output compressor
@@ -375,12 +375,12 @@ Containment rules (the first two are already implemented correctly in `Workspace
 
 1. **Nonexistent targets resolve through their nearest existing ancestor.** `File.realpath` fails on a path that does not exist, so `write_file` for a new file must walk up to the nearest existing ancestor, `realpath` that, and re-join the remaining components. `Environment#resolve_contained_path` does this.
 2. **Prefix check is `root + "/"`, not `root`.** `starts_with?(@root)` accepts `/home/x/proj-evil` for root `/home/x/proj`. `Environment#path_inside_root?` compares against `"#{@root}/"` and separately allows exact equality with `@root`.
-3. **Protected paths — mutation tools refuse unconditionally.** Root containment is not sufficient, because some in-tree files are part of NIGHTMARE's own trust boundary. `.nightmare/prompt.md` is a Tier-2 system-directive source that lives *inside* `@root` and, without this rule, is model-writable: a **persistent prompt injection** that survives restarts. The protected set, checked on workspace-relative paths after resolution:
+3. **Protected paths — mutation tools refuse unconditionally.** Root containment is not sufficient, because some in-tree files are part of NIGHTMARE's own trust boundary. `.nightmare/prompt.md` is a Tier-2 system prompt source that lives *inside* `@root` and, without this rule, is model-writable: a **persistent prompt injection** that survives restarts. The protected set, checked on workspace-relative paths after resolution:
 
    | Pattern | Rationale |
    | :--- | :--- |
    | `.git` and `.git/**` | R3 explicit requirement; repository integrity |
-   | `.nightmare/**` | Directive source — prompt-injection persistence |
+   | `.nightmare/**` | System prompt source — prompt-injection persistence |
    | `.nightmare*` (any sibling) | Reserved namespace |
 
    Violations return a tool failure (`[Refused: <path> is a protected path]`), not an approval modal. They are never approvable.
@@ -441,7 +441,7 @@ STDOUT Notification Banner emitted
 ### Pipeline 2: Prompt Assembly (Live Re-Read) **[R2]**
 
 ```text
-1. Active Directive Block (CLI flag > repo .nightmare/prompt.md > XDG workspace > XDG global > default)
+1. Active System Prompt Block (CLI flag > repo .nightmare/prompt.md > XDG workspace > XDG global > default)
 2. Pinned Files Block:
      For each pinned path: re-read via Tools::Guard.resolve_read, format as
        === PINNED FILE: #{path} ===\n#{content}
@@ -452,7 +452,7 @@ STDOUT Notification Banner emitted
      Turn#messages as-is (shed tool messages already rewritten in place).
 ```
 
-Block ordering: directive, then pinned files, then history. **This is a deliberate cache trade-off.** Pinned files are re-read every turn, so when the model edits a pinned file the prefix changes and prompt caching is invalidated for the entire history behind it. Placing the pinned block *after* history would preserve the cached prefix but would put live file state below stale tool results, which is the correctness problem `/add` exists to solve. **Decision (D5): pinned-before-history**, accepting the cache cost consciously. Correctness over cache locality.
+Block ordering: system prompt, then pinned files, then history. **This is a deliberate cache trade-off.** Pinned files are re-read every turn, so when the model edits a pinned file the prefix changes and prompt caching is invalidated for the entire history behind it. Placing the pinned block *after* history would preserve the cached prefix but would put live file state below stale tool results, which is the correctness problem `/add` exists to solve. **Decision (D5): pinned-before-history**, accepting the cache cost consciously. Correctness over cache locality.
 
 ### Pipeline 3: In-Turn Tool Loop & Shedding **[R2]**
 
@@ -633,7 +633,7 @@ Two `Ctrl+C` in rapid succession at an empty prompt exits, as does `/exit` or EO
 
 - **Config**: `$XDG_CONFIG_HOME/nightmare/workspaces/<workspace_id>/`
   - `workspace.json` — metadata linking workspace ID to `@root`
-  - `prompt.md` — per-workspace system directive
+  - `prompt.md` — per-workspace system prompt
   - `allow` — persisted shell allowlist (token patterns; §4.2)
 - **State & Logs**: `$XDG_STATE_HOME/nightmare/workspaces/<workspace_id>/`
   - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Disabled by `--no-log`.
@@ -724,7 +724,7 @@ Nothing in the previous revision said how correctness was to be verified, which 
 | **T16** | **Loop detection.** Identical `(tool, args)` `LOOP_DETECT_THRESHOLD` times yields a refusal tool result and no execution. |
 | **T17** | **Calibration math.** Divisor converges per the EMA formula, clamps at both bounds, and tolerates `prompt_eval_count == nil` on every response without dividing by zero. |
 | **T18** | **Zero repo litter.** After a full scripted session, `@root` contains exactly the files the session intentionally wrote — no config, no logs, no transcript. (Already implemented as `WorkspaceSandbox#assert_zero_repo_litter!`.) |
-| **T19** | **`/prompt edit` is memory-only.** The directive changes; every on-disk directive source is byte-identical afterward. |
+| **T19** | **`/prompt edit` is memory-only.** The system prompt changes; every on-disk prompt source is byte-identical afterward. |
 
 Unit specs must stay fast — no network, no sleeps, no compiler invocations. Process-level e2e specs gate behind the memoized `Nightmare::E2E.repl_ready?` probe so that unimplemented milestones report `pending!` immediately rather than accumulating timeouts.
 

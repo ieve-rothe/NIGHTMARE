@@ -12,7 +12,7 @@ Target: Ollama local inference only. Frameworks: `mantle` (inference, tool loop)
 Nightmare
 ├── CLI                           # ARGV parsing, flag extraction, entrypoint
 ├── Workspace                     # Canonical root resolution, XDG directory mapping, banner
-├── Directives                    # Precedence resolution, in-memory editor buffer
+├── SystemPrompt                  # Precedence resolution, in-memory editor buffer
 ├── Context
 │   ├── SlidingStore              # In-memory turn-unit FIFO context store
 │   ├── Shedder                   # In-turn & historical tool output compressor
@@ -337,7 +337,7 @@ It is a **class**, not a struct: `env.manifest.touch` on a struct mutates a copy
    | Pattern | Rationale |
    | :--- | :--- |
    | `.git` and `.git/**` | R3 requirement; repository integrity |
-   | `.nightmare/**` | Tier-2 directive source; prompt-injection persistence |
+   | `.nightmare/**` | Tier-2 system prompt source; prompt-injection persistence |
    | `.nightmare*` (any sibling) | Reserved namespace |
 
    Violations return a tool failure (`[Refused: <path> is a protected path]`), never an approval modal. They are not approvable.
@@ -394,7 +394,7 @@ STDOUT notification banner emitted
 ### Pipeline 2: Prompt assembly (live re-read)
 
 ```text
-1. Active Directive Block (CLI flag > repo .nightmare/prompt.md > XDG workspace > XDG global > default)
+1. Active System Prompt Block (CLI flag > repo .nightmare/prompt.md > XDG workspace > XDG global > default)
 2. Pinned Files Block:
      For each pinned path: re-read via Tools::Guard.resolve_read, format as
        === PINNED FILE: #{path} ===\n#{content}
@@ -405,7 +405,7 @@ STDOUT notification banner emitted
      Turn#messages as-is (shed tool messages already rewritten in place).
 ```
 
-Block order is directive → pinned files → history. Pinned files are re-read every turn, so editing a pinned file invalidates the prompt cache for the history behind it. This cost is accepted: live file state must not sit below stale tool results.
+Block order is system prompt → pinned files → history. Pinned files are re-read every turn, so editing a pinned file invalidates the prompt cache for the history behind it. This cost is accepted: live file state must not sit below stale tool results.
 
 ### Pipeline 3: In-turn tool loop & shedding
 
@@ -561,7 +561,7 @@ Two `Ctrl+C` in rapid succession at an empty prompt exits, as does `/exit` or EO
 
 - **Config**: `$XDG_CONFIG_HOME/nightmare/workspaces/<workspace_id>/`
   - `workspace.json` — metadata linking workspace ID to `@root`
-  - `prompt.md` — per-workspace system directive
+  - `prompt.md` — per-workspace system prompt
   - `allow` — persisted shell allowlist (token patterns; §4.2)
 - **State & Logs**: `$XDG_STATE_HOME/nightmare/workspaces/<workspace_id>/`
   - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Disabled by `--no-log`.
@@ -648,6 +648,6 @@ All live in `Nightmare::Config` with per-workspace overrides in `$XDG_CONFIG_HOM
 | **T16** | **Loop detection.** Identical `(tool, args)` `LOOP_DETECT_THRESHOLD` times yields a refusal tool result and no execution. |
 | **T17** | **Calibration math.** Divisor converges per the EMA formula, clamps at both bounds, and tolerates `prompt_eval_count == nil` on every response without dividing by zero. |
 | **T18** | **Zero repo litter.** After a full scripted session, `@root` contains exactly the files the session intentionally wrote — no config, no logs, no transcript. (`WorkspaceSandbox#assert_zero_repo_litter!`.) |
-| **T19** | **`/prompt edit` is memory-only.** The directive changes; every on-disk directive source is byte-identical afterward. |
+| **T19** | **`/prompt edit` is memory-only.** The system prompt changes; every on-disk prompt source is byte-identical afterward. |
 
 Unit specs must stay fast — no network, no sleeps, no compiler invocations. Process-level e2e specs gate behind the memoized `Nightmare::E2E.repl_ready?` probe so unimplemented milestones report `pending!` immediately.

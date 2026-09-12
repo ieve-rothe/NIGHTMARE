@@ -153,7 +153,7 @@ describe "Shedder and SlidingStore Context Engine" do
   end
 
   describe "sliding store assembly" do
-    it "assembles wire format in strict order: directive -> pinned -> history -> active" do
+    it "assembles wire format in strict order: system prompt -> pinned -> history -> active" do
       store = Nightmare::Context::SlidingStore.new
 
       # History
@@ -164,9 +164,9 @@ describe "Shedder and SlidingStore Context Engine" do
       # Active
       store.start_turn("Q2")
 
-      msgs = store.assemble_messages(directive: "System prompt", pinned_block: "=== PINNED FILE: a.cr ===")
+      msgs = store.assemble_messages(system_prompt: "System prompt", pinned_block: "=== PINNED FILE: a.cr ===")
 
-      # First message: system directive + pinned block
+      # First message: system prompt + pinned block
       msgs[0].role.should eq("system")
       msgs[0].content.not_nil!.should contain("System prompt")
       msgs[0].content.not_nil!.should contain("=== PINNED FILE: a.cr ===")

@@ -41,6 +41,7 @@ end
 
 # In-process fake client for deterministic testing of inference and step loops (ARCHITECTURE_R3 §9)
 class FakeClient < Mantle::Clients::Client
+  property model_name : String = "fake"
   property responses : Array(Mantle::Clients::Response)
   property call_count : Int32 = 0
   property recorded_messages : Array(Array(Mantle::Message)) = [] of Array(Mantle::Message)

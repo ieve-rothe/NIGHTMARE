@@ -93,7 +93,7 @@ On launch, NIGHTMARE prints a clear banner identifying the workspace and its ass
 
 ## 4. Configuration Hierarchy
 
-NIGHTMARE resolves configuration and system directives using strict precedence rules.
+NIGHTMARE resolves configuration and system prompts using strict precedence rules.
 
 ### Model Selection
 
@@ -128,7 +128,7 @@ Place this in `~/.config/nightmare/config.json` for global defaults, or in a wor
 
 ### System Prompt Resolution
 
-System directives are resolved in the following strict order:
+System prompts are resolved in the following strict order:
 
 1. **CLI Flag**: `-s PATH` or `--system=PATH`
 2. **Repository Override**: `<workspace_root>/.nightmare/prompt.md`

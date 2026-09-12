@@ -28,7 +28,7 @@ Recommend: **argv only**, allowlist matches on tokenized `argv[0]` + subcommand,
 
 - `File.realpath` fails on nonexistent paths — `write_file` for a new file needs `realpath(dirname)` + join.
 - Check `starts_with?(root + "/")`, not `starts_with?(root)` (`/home/x/proj` vs `/home/x/proj-evil`).
-- **The local directive file lives inside `@root` and is writable by the model.** That's persistent prompt injection. Add a protected-paths set (directive file, `.git/`, `.nightmare*`) that mutation tools refuse.
+- **The local system prompt file lives inside `@root` and is writable by the model.** That's persistent prompt injection. Add a protected-paths set (system prompt file, `.git/`, `.nightmare*`) that mutation tools refuse.
 - `PinnedFile#read_content`: `if s = @slice_start, e = @slice_end` isn't valid Crystal, and the slice will raise on out-of-range. Also needs the same root guard as tools.
 
 ## 4. Missing `StepErrorKind`s

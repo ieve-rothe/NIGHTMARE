@@ -1,8 +1,8 @@
 require "./spec_helper"
 require "digest/sha256"
 
-describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
-  describe "Directives Precedence & Missing/Empty/Whitespace Handling (F1.6)" do
+describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
+  describe "System Prompt Precedence & Missing/Empty/Whitespace Handling (F1.6)" do
     it "enforces strict 5-tier precedence: CLI > Repo > Workspace > Global > Default" do
       with_temp_dir do |dir|
         with_temp_dir do |xdg|
@@ -11,48 +11,48 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
             # Setup 4 distinct files
             cli_file = File.join(dir, "cli_prompt.md")
-            File.write(cli_file, "Tier 1: CLI Directive")
+            File.write(cli_file, "Tier 1: CLI Prompt")
 
             Dir.mkdir_p(File.dirname(env.repo_prompt_path))
-            File.write(env.repo_prompt_path, "Tier 2: Repo Directive")
+            File.write(env.repo_prompt_path, "Tier 2: Repo Prompt")
 
             Dir.mkdir_p(File.dirname(env.workspace_prompt_path))
-            File.write(env.workspace_prompt_path, "Tier 3: Workspace Directive")
+            File.write(env.workspace_prompt_path, "Tier 3: Workspace Prompt")
 
             Dir.mkdir_p(File.dirname(env.global_prompt_path))
-            File.write(env.global_prompt_path, "Tier 4: Global Directive")
+            File.write(env.global_prompt_path, "Tier 4: Global Prompt")
 
             # 1. All 4 present: CLI must win
-            res1 = Nightmare::Directives::Resolver.resolve_with_source(env, cli_file)
-            res1.source.should eq(Nightmare::Directives::Source::CliFlag)
-            res1.text.should eq("Tier 1: CLI Directive")
+            res1 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, cli_file)
+            res1.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
+            res1.text.should eq("Tier 1: CLI Prompt")
             res1.path.should eq(cli_file)
 
             # 2. Without CLI: Repo must win over Workspace & Global
-            res2 = Nightmare::Directives::Resolver.resolve_with_source(env, nil)
-            res2.source.should eq(Nightmare::Directives::Source::RepoOverride)
-            res2.text.should eq("Tier 2: Repo Directive")
+            res2 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, nil)
+            res2.source.should eq(Nightmare::SystemPrompt::Source::RepoOverride)
+            res2.text.should eq("Tier 2: Repo Prompt")
             res2.path.should eq(env.repo_prompt_path)
 
             # 3. Delete Repo: Workspace must win over Global
             File.delete(env.repo_prompt_path)
-            res3 = Nightmare::Directives::Resolver.resolve_with_source(env, nil)
-            res3.source.should eq(Nightmare::Directives::Source::WorkspaceConfig)
-            res3.text.should eq("Tier 3: Workspace Directive")
+            res3 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, nil)
+            res3.source.should eq(Nightmare::SystemPrompt::Source::WorkspaceConfig)
+            res3.text.should eq("Tier 3: Workspace Prompt")
             res3.path.should eq(env.workspace_prompt_path)
 
             # 4. Delete Workspace: Global must win
             File.delete(env.workspace_prompt_path)
-            res4 = Nightmare::Directives::Resolver.resolve_with_source(env, nil)
-            res4.source.should eq(Nightmare::Directives::Source::GlobalConfig)
-            res4.text.should eq("Tier 4: Global Directive")
+            res4 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, nil)
+            res4.source.should eq(Nightmare::SystemPrompt::Source::GlobalConfig)
+            res4.text.should eq("Tier 4: Global Prompt")
             res4.path.should eq(env.global_prompt_path)
 
             # 5. Delete Global: Default General Persona must win
             File.delete(env.global_prompt_path)
-            res5 = Nightmare::Directives::Resolver.resolve_with_source(env, nil)
-            res5.source.should eq(Nightmare::Directives::Source::DefaultPersona)
-            res5.text.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            res5 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, nil)
+            res5.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
+            res5.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
             res5.path.should be_nil
           end
         end
@@ -72,18 +72,18 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
             File.write(env.workspace_prompt_path, "") # 0 bytes
 
             Dir.mkdir_p(File.dirname(env.global_prompt_path))
-            File.write(env.global_prompt_path, "Global directive survived empty tiers")
+            File.write(env.global_prompt_path, "Global prompt survived empty tiers")
 
             # Should fall through empty repo and workspace to global
-            res = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res.source.should eq(Nightmare::Directives::Source::GlobalConfig)
-            res.text.should eq("Global directive survived empty tiers")
+            res = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res.source.should eq(Nightmare::SystemPrompt::Source::GlobalConfig)
+            res.text.should eq("Global prompt survived empty tiers")
 
             # When global is also 0 bytes, falls through to default persona
             File.write(env.global_prompt_path, "")
-            res2 = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res2.source.should eq(Nightmare::Directives::Source::DefaultPersona)
-            res2.text.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            res2 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res2.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
+            res2.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
           end
         end
       end
@@ -101,26 +101,26 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
             # Workspace with valid content
             Dir.mkdir_p(File.dirname(env.workspace_prompt_path))
-            File.write(env.workspace_prompt_path, "Workspace directive survived whitespace repo")
+            File.write(env.workspace_prompt_path, "Workspace prompt survived whitespace repo")
 
-            res = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res.source.should eq(Nightmare::Directives::Source::WorkspaceConfig)
-            res.text.should eq("Workspace directive survived whitespace repo")
+            res = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res.source.should eq(Nightmare::SystemPrompt::Source::WorkspaceConfig)
+            res.text.should eq("Workspace prompt survived whitespace repo")
 
             # Workspace changed to whitespace -> falls through to global
             File.write(env.workspace_prompt_path, "   \n\n\n\t   ")
             Dir.mkdir_p(File.dirname(env.global_prompt_path))
-            File.write(env.global_prompt_path, "Global directive reached")
+            File.write(env.global_prompt_path, "Global prompt reached")
 
-            res2 = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res2.source.should eq(Nightmare::Directives::Source::GlobalConfig)
-            res2.text.should eq("Global directive reached")
+            res2 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res2.source.should eq(Nightmare::SystemPrompt::Source::GlobalConfig)
+            res2.text.should eq("Global prompt reached")
 
             # Global also whitespace -> falls through to default persona
             File.write(env.global_prompt_path, "\t  \r\n")
-            res3 = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res3.source.should eq(Nightmare::Directives::Source::DefaultPersona)
-            res3.text.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            res3 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res3.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
+            res3.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
           end
         end
       end
@@ -133,23 +133,23 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
             env = Nightmare::Workspace::Environment.resolve(dir)
 
             # 1. Non-existent CLI file raises ArgumentError with descriptive path
-            expect_raises(ArgumentError, /System directive file not found: non_existent\.md/) do
-              Nightmare::Directives::Resolver.resolve_with_source(env, "non_existent.md")
+            expect_raises(ArgumentError, /System prompt file not found: non_existent\.md/) do
+              Nightmare::SystemPrompt::Resolver.resolve_with_source(env, "non_existent.md")
             end
 
             # 2. Directory passed as CLI flag raises ArgumentError
             sub_dir = File.join(dir, "some_dir")
             Dir.mkdir_p(sub_dir)
-            expect_raises(ArgumentError, /System directive file not found/) do
-              Nightmare::Directives::Resolver.resolve_with_source(env, sub_dir)
+            expect_raises(ArgumentError, /System prompt file not found/) do
+              Nightmare::SystemPrompt::Resolver.resolve_with_source(env, sub_dir)
             end
 
             # 3. CLI flag pointing to empty or whitespace file returns DefaultPersona with CliFlag source
             empty_cli = File.join(dir, "empty_cli.md")
             File.write(empty_cli, "   \n\t  ")
-            res_empty = Nightmare::Directives::Resolver.resolve_with_source(env, empty_cli)
-            res_empty.source.should eq(Nightmare::Directives::Source::CliFlag)
-            res_empty.text.should eq(Nightmare::Directives::DEFAULT_PERSONA)
+            res_empty = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, empty_cli)
+            res_empty.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
+            res_empty.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
             res_empty.path.should eq(empty_cli)
 
             # 4. Relative CLI path resolves against workspace root
@@ -157,8 +157,8 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
             full_rel = File.join(dir, rel_file)
             Dir.mkdir_p(File.dirname(full_rel))
             File.write(full_rel, "Relative CLI Prompt")
-            res_rel = Nightmare::Directives::Resolver.resolve_with_source(env, rel_file)
-            res_rel.source.should eq(Nightmare::Directives::Source::CliFlag)
+            res_rel = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, rel_file)
+            res_rel.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
             res_rel.path.should eq(full_rel)
             res_rel.text.should eq("Relative CLI Prompt")
 
@@ -166,23 +166,23 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
             with_temp_dir do |external_dir|
               ext_file = File.join(external_dir, "external_prompt.md")
               File.write(ext_file, "External System Prompt")
-              res_ext = Nightmare::Directives::Resolver.resolve_with_source(env, ext_file)
-              res_ext.source.should eq(Nightmare::Directives::Source::CliFlag)
+              res_ext = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, ext_file)
+              res_ext.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
               res_ext.path.should eq(ext_file)
               res_ext.text.should eq("External System Prompt")
 
               # 6. Symlink pointing to external file
               sym_file = File.join(dir, "symlink_prompt.md")
               File.symlink(ext_file, sym_file)
-              res_sym = Nightmare::Directives::Resolver.resolve_with_source(env, sym_file)
-              res_sym.source.should eq(Nightmare::Directives::Source::CliFlag)
+              res_sym = Nightmare::SystemPrompt::Resolver.resolve_with_source(env, sym_file)
+              res_sym.source.should eq(Nightmare::SystemPrompt::Source::CliFlag)
               res_sym.text.should eq("External System Prompt")
 
               # 7. Dangling symlink raises ArgumentError
               dangling_sym = File.join(dir, "dangling.md")
               File.symlink(File.join(external_dir, "missing.md"), dangling_sym)
-              expect_raises(ArgumentError, /System directive file not found/) do
-                Nightmare::Directives::Resolver.resolve_with_source(env, dangling_sym)
+              expect_raises(ArgumentError, /System prompt file not found/) do
+                Nightmare::SystemPrompt::Resolver.resolve_with_source(env, dangling_sym)
               end
             end
           end
@@ -199,14 +199,14 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
             env = Nightmare::Workspace::Environment.resolve(dir, ensure_dirs: false)
 
             # Must not crash, falls through gracefully
-            res = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res.source.should eq(Nightmare::Directives::Source::DefaultPersona)
+            res = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
 
             # When .nightmare/prompt.md is a directory, must not crash, falls through gracefully
             File.delete(File.join(dir, ".nightmare"))
             Dir.mkdir_p(File.join(dir, ".nightmare", "prompt.md"))
-            res2 = Nightmare::Directives::Resolver.resolve_with_source(env)
-            res2.source.should eq(Nightmare::Directives::Source::DefaultPersona)
+            res2 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)
+            res2.source.should eq(Nightmare::SystemPrompt::Source::DefaultPersona)
           end
         end
       end
@@ -245,11 +245,11 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
             # Test in-memory mutation across all 4 source buffers
             [
-              Nightmare::Directives::Resolver.resolve_manager(env, cli_file),
-              Nightmare::Directives::Resolver.resolve_manager(env, nil), # Repo
+              Nightmare::SystemPrompt::Resolver.resolve_manager(env, cli_file),
+              Nightmare::SystemPrompt::Resolver.resolve_manager(env, nil), # Repo
             ].each_with_index do |buffer, idx|
               buffer.modified?.should be_false
-              original_val = buffer.active_directive
+              original_val = buffer.active_prompt
 
               # Execute edit with custom sed/echo command replacing content in tempfile
               mock_editor = "sed -i 's/v1.0/v2.0-MUTATED-IN-RAM/'"
@@ -257,8 +257,8 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
               success.should be_true
               buffer.modified?.should be_true
-              buffer.active_directive.should contain("v2.0-MUTATED-IN-RAM")
-              buffer.original_directive.should eq(original_val)
+              buffer.active_prompt.should contain("v2.0-MUTATED-IN-RAM")
+              buffer.original_prompt.should eq(original_val)
 
               # Verify all disk files are 100% UNTOUCHED
               after_shas = tracked_files.map { |f| Digest::SHA256.hexdigest(File.read(f)) }
@@ -271,7 +271,7 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
               # Verify reset! restores original in-memory value
               buffer.reset!
-              buffer.active_directive.should eq(original_val)
+              buffer.active_prompt.should eq(original_val)
               buffer.modified?.should be_false
             end
           end
@@ -280,9 +280,9 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
     end
 
     it "handles normal editor non-zero exit codes (1, 2, 127) with rollback and no-op" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Clean Initial System Prompt",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -291,7 +291,7 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
       res1 = buffer.edit(editor_override: "sh -c 'exit 1' --", io_err: err_io)
       res1.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Clean Initial System Prompt")
+      buffer.active_prompt.should eq("Clean Initial System Prompt")
       err_io.to_s.should contain("Editor exited with non-zero status (1)")
 
       # 2. Exit code 2
@@ -299,7 +299,7 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
       res2 = buffer.edit(editor_override: "sh -c 'exit 2' --", io_err: err_io)
       res2.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Clean Initial System Prompt")
+      buffer.active_prompt.should eq("Clean Initial System Prompt")
       err_io.to_s.should contain("Editor exited with non-zero status (2)")
 
       # 3. Exit code 127 (command not found)
@@ -307,14 +307,14 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
       res3 = buffer.edit(editor_override: "/bin/sh -c 'exit 127' --", io_err: err_io)
       res3.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Clean Initial System Prompt")
+      buffer.active_prompt.should eq("Clean Initial System Prompt")
       err_io.to_s.should contain("Editor exited with non-zero status (127)")
     end
 
     it "gracefully handles when editor process terminates abnormally via signal (e.g. SIGKILL)" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
-        current_text: "Initial directive",
-        source: Nightmare::Directives::Source::DefaultPersona
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
+        current_text: "Initial prompt",
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -322,15 +322,15 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
 
       res = buffer.edit(editor_override: mock_editor, io_err: err_io)
       res.should be_false
-      buffer.current_text.should eq("Initial directive")
+      buffer.current_text.should eq("Initial prompt")
       err_io.to_s.should contain("Notice: Editor exited with non-zero status")
       err_io.to_s.should contain("signal")
     end
 
-    it "handles empty editor output with warning and retains previous directive" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
-        current_text: "Non-empty directive before edit",
-        source: Nightmare::Directives::Source::DefaultPersona
+    it "handles empty editor output with warning and retains previous system prompt" do
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
+        current_text: "Non-empty prompt before edit",
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       err_io = IO::Memory.new
@@ -339,22 +339,22 @@ describe "Empirical Directives Challenge (F1.6, F1.8, F1.7)" do
       res = buffer.edit(editor_override: "sh -c '> \"$1\"' --", io_err: err_io)
       res.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Non-empty directive before edit")
-      err_io.to_s.should contain("Warning: Edited directive was empty. Retaining previous directive.")
+      buffer.active_prompt.should eq("Non-empty prompt before edit")
+      err_io.to_s.should contain("Warning: Edited system prompt was empty. Retaining previous system prompt.")
 
       # Editor writes only whitespace
       err_io.clear
       res2 = buffer.edit(editor_override: "sh -c 'echo \"   \t\n  \" > \"$1\"' --", io_err: err_io)
       res2.should be_false
       buffer.modified?.should be_false
-      buffer.active_directive.should eq("Non-empty directive before edit")
-      err_io.to_s.should contain("Warning: Edited directive was empty. Retaining previous directive.")
+      buffer.active_prompt.should eq("Non-empty prompt before edit")
+      err_io.to_s.should contain("Warning: Edited system prompt was empty. Retaining previous system prompt.")
     end
 
     it "guarantees clean tempfile deletion on both success and failure" do
-      buffer = Nightmare::Directives::DirectiveBuffer.new(
+      buffer = Nightmare::SystemPrompt::SystemPromptBuffer.new(
         current_text: "Tempfile cleanup test",
-        source: Nightmare::Directives::Source::DefaultPersona
+        source: Nightmare::SystemPrompt::Source::DefaultPersona
       )
 
       canary_file = File.tempfile("canary").path
