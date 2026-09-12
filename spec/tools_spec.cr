@@ -122,6 +122,53 @@ describe "Nightmare Tools Suite & Security Boundaries" do
         json["lines"].as_i.should eq(2)
       end
     end
+
+    it "refuses unpaginated bulk data files (*.jsonl, *.log)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "events.jsonl"), "{\"k\":\"v\"}\n" * 10)
+
+        # Unpaginated read should be refused
+        result = tools.read_file("events.jsonl")
+        result.should contain("[Refused:")
+        result.should contain("matches bulk data/log pattern")
+
+        # Exceeding bulk_data_max_lines should also be refused
+        result_excessive = tools.read_file("events.jsonl", limit: 100)
+        result_excessive.should contain("[Refused:")
+        result_excessive.should contain("matches bulk data/log pattern")
+
+        # Paginated read within limit should succeed
+        result_paginated = tools.read_file("events.jsonl", offset: 1, limit: 5)
+        result_paginated.should_not contain("[Refused:")
+        result_paginated.should contain("1 | {\"k\":\"v\"}")
+      end
+    end
+
+    it "refuses files exceeding per_file_max_tokens ceiling" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.per_file_max_tokens = 50 # very low ceiling for test
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        # 30 lines of 30 chars = 900 chars => ~257 tokens > 50 tokens
+        File.write(File.join(root, "huge.txt"), ("long line of content text here\n" * 30))
+
+        result = tools.read_file("huge.txt")
+        result.should contain("[Refused:")
+        result.should contain("exceeds the per-file context limit of 50 tokens")
+        result.should contain("use read_file with 'offset' and 'limit'")
+
+        # Reading small slice under 50 tokens should succeed
+        slice_result = tools.read_file("huge.txt", offset: 1, limit: 2)
+        slice_result.should_not contain("[Refused:")
+        slice_result.should contain("1 | long line of content text here")
+      end
+    end
   end
 
   describe "mutation tools and diff approval" do

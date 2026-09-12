@@ -28,6 +28,9 @@ module Nightmare
     property format_retries : Int32 = Nightmare::Config::FORMAT_RETRIES
     property context_overflow_retries : Int32 = Nightmare::Config::CONTEXT_OVERFLOW_RETRIES
     property token_hardmax : Int32 = Nightmare::Config::TOKEN_HARDMAX
+    property per_file_max_tokens : Int32 = Nightmare::Config::PER_FILE_MAX_TOKENS
+    property bulk_data_patterns : Array(String) = Nightmare::Config::BULK_DATA_PATTERNS
+    property bulk_data_max_lines : Int32 = Nightmare::Config::BULK_DATA_MAX_LINES_DEFAULT
     property pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO
     property shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO
     property shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS
@@ -57,6 +60,9 @@ module Nightmare
       @format_retries : Int32 = Nightmare::Config::FORMAT_RETRIES,
       @context_overflow_retries : Int32 = Nightmare::Config::CONTEXT_OVERFLOW_RETRIES,
       @token_hardmax : Int32 = Nightmare::Config::TOKEN_HARDMAX,
+      @per_file_max_tokens : Int32 = Nightmare::Config::PER_FILE_MAX_TOKENS,
+      @bulk_data_patterns : Array(String) = Nightmare::Config::BULK_DATA_PATTERNS,
+      @bulk_data_max_lines : Int32 = Nightmare::Config::BULK_DATA_MAX_LINES_DEFAULT,
       @pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO,
       @shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO,
       @shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS,

@@ -116,6 +116,21 @@ module Nightmare::UI
         raw_limit = args["limit"]?
         limit = raw_limit.try(&.as_i?) || raw_limit.try(&.as_s?.try(&.to_i?))
 
+        if result_str.starts_with?("[Refused:")
+          tag = Theme.bracket_tag("GUARD", "REFUSED", Theme.status_tag)
+          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET}"
+          result_str.strip.each_line do |line|
+            @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+          end
+          @output.flush
+          return
+        elsif result_str.starts_with?("[File is already pinned")
+          tag = Theme.bracket_tag("PINNED", "SHORT-CIRCUIT", Theme.status_tag)
+          @output.puts "  #{Theme.status_tag}📌#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
+          @output.flush
+          return
+        end
+
         opened = record_file_open(path, result_str, offset, limit)
 
         if collapsed_mode?

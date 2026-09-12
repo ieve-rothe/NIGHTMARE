@@ -46,7 +46,7 @@ module Nightmare::Tools
       output = results.join("\n")
       output = "(no matching files)" if output.empty?
 
-      Guard.cap_output(output)
+      Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
     end
 
     # Greps for pattern in files across workspace, excluding git/nightmare/sensitive files
@@ -94,7 +94,7 @@ module Nightmare::Tools
       output = matches.join("\n")
       output = "(no matches found)" if output.empty?
 
-      Guard.cap_output(output)
+      Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
     end
 
     # Reads file contents with optional 1-based line offset and limit
@@ -110,17 +110,44 @@ module Nightmare::Tools
         return {error: "File not found: #{path}"}.to_json
       end
 
-      lines = File.read_lines(full_path)
+      settings = @guard.env.settings
+
+      # Guard against unpaginated bulk/log file reads
+      if bulk_data_file?(rel_path, settings.bulk_data_patterns)
+        if limit.nil? || limit > settings.bulk_data_max_lines
+          return "[Refused: '#{rel_path}' matches bulk data/log pattern (#{settings.bulk_data_patterns.join(", ")}). " \
+                 "To prevent context saturation, specify 'offset' and 'limit' (max #{settings.bulk_data_max_lines} lines per read), " \
+                 "or use 'search' to locate specific entries.]"
+        end
+      end
+
       start_line = offset ? Math.max(1, offset) : 1
-      max_lines = limit ? Math.max(0, limit) : lines.size
 
-      lo = Math.max(0, start_line - 1)
-      hi = Math.min(lines.size - 1, lo + max_lines - 1)
-
-      selected_lines = if lo <= hi && lo < lines.size
-        lines[lo..hi]
+      selected_lines = [] of String
+      if offset || limit
+        max_lines = limit ? Math.max(0, limit) : Int32::MAX
+        idx = 0
+        File.each_line(full_path) do |line|
+          idx += 1
+          if idx >= start_line && selected_lines.size < max_lines
+            selected_lines << line
+          elsif idx >= start_line + max_lines
+            break
+          end
+        end
       else
-        [] of String
+        # If no offset/limit, perform quick size pre-check against per_file_max_tokens
+        # At minimum 1 char/byte and divisor 3.5, if size in bytes > per_file_max_tokens * 8, it's definitely over limit
+        file_bytes = File.size(full_path)
+        if file_bytes > (settings.per_file_max_tokens.to_i64 * 8)
+          rough_tok = (file_bytes.to_f / settings.initial_divisor).ceil.to_i
+          return "[Refused: File '#{rel_path}' (~#{rough_tok} estimated tokens) exceeds the per-file context limit of #{settings.per_file_max_tokens} tokens. " \
+                 "To inspect this file without saturating context: " \
+                 "1) use read_file with 'offset' and 'limit' to read a smaller window, " \
+                 "2) use 'search' to locate specific patterns, or " \
+                 "3) extract key lessons into a smaller artifact using spawn_subagent.]"
+        end
+        selected_lines = File.read_lines(full_path)
       end
 
       formatted = selected_lines.map_with_index do |line, idx|
@@ -128,7 +155,26 @@ module Nightmare::Tools
         "#{line_num.to_s.rjust(5)} | #{line}"
       end.join("\n")
 
-      Guard.cap_output(formatted)
+      # Token ceiling verification
+      divisor = settings.initial_divisor
+      estimated_tokens = (formatted.size.to_f / divisor).ceil.to_i
+      if estimated_tokens > settings.per_file_max_tokens
+        return "[Refused: Content for '#{rel_path}' (~#{estimated_tokens} tokens) exceeds the per-file context limit of #{settings.per_file_max_tokens} tokens. " \
+               "To inspect this file without saturating context: " \
+               "1) use read_file with 'offset' and 'limit' to read a smaller window, " \
+               "2) use 'search' to locate specific patterns, or " \
+               "3) extract key lessons into a smaller artifact using spawn_subagent.]"
+      end
+
+      Guard.cap_output(formatted, max_bytes: settings.tool_output_max_bytes)
+    end
+
+    private def bulk_data_file?(rel_path : String, patterns : Array(String)) : Bool
+      clean_rel = rel_path
+      basename = File.basename(clean_rel)
+      patterns.any? do |pattern|
+        File.match?(pattern, clean_rel) || File.match?(pattern, basename)
+      end
     end
 
     # Returns metadata for a file in the workspace

@@ -23,7 +23,15 @@ module Nightmare
     DEFAULT_COMMAND_TIMEOUT = 60.seconds
     MAX_COMMAND_TIMEOUT = 600.seconds
     PROCESS_GRACE_PERIOD = 2.seconds
-    TOOL_OUTPUT_MAX_BYTES = 65_536
+    TOOL_OUTPUT_MAX_BYTES = 24_576
+    PER_FILE_MAX_TOKENS = 10_000
+    BULK_DATA_PATTERNS = [
+      "*.jsonl",
+      "*.log",
+      "*.trace",
+      "*.ndjson"
+    ]
+    BULK_DATA_MAX_LINES_DEFAULT = 50
     DEFAULT_MODEL = "qwen2.5-coder:7b"
     AUDIT_LOG_MAX_BYTES = 20_971_520
     SHELL_COMMAND_TIMEOUT_SECONDS = 60
