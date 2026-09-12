@@ -189,17 +189,19 @@ The `run_command` tool executes arbitrary shell tasks within the workspace.
 #### The Command Approval Modal
 
 ```
-Approve command execution?
-  Command : git status
-  Approvals: [y] Approve once  [N] Reject  [e] Edit command  [a] Allow exact  [p] Allow prefix
-Choice [y/N/e/a/p]:
+Command: git status
+Cwd:     /path/to/workspace
+Timeout: 30s
+Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix
+Approve command? [y/N/e/a/p]:
 ```
 
-- **`y`**: Executes the command once.
+- **`y`**: Executes the command once without saving to the allowlist.
 - **`N` (or Enter)**: Rejects the command.
-- **`e`**: Allows inline operator editing before execution.
-- **`a`**: Whitelists the exact command string for the remainder of the session.
-- **`p`**: Whitelists the command prefix (e.g. `git status` allows future `git status ...`).
+- **`e`**: Allows inline operator editing before execution (runs once without saving).
+- **`a`**: Saves the exact command string to the allowlist (auto-approved in future).
+- **`p`**: Saves the command prefix to the allowlist (e.g. `git status` allows future `git status ...`).
+- **`?`**: Displays detailed help explaining each option and reprompts.
 
 > [!IMPORTANT]
 > **Metacharacter Ban**: Commands containing shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``, `$()`, `>`, `<`) **cannot** be auto-approved via `[a]` or `[p]`. They will always trigger an interactive prompt to protect against command injection.

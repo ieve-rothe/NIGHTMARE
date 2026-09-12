@@ -82,5 +82,58 @@ describe Nightmare::UI::Approval do
       outcome.should eq(Nightmare::Tools::ApprovalOutcome::Edit)
       edit.should eq("git diff")
     end
+
+    it "displays hint explaining saving behavior for approval choices" do
+      input = IO::Memory.new("y\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      approval.approve_command("git status", ["git", "status"], false, 30)
+      out_str = output.to_s
+      out_str.should contain("Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix")
+    end
+
+    it "returns AllSession for 'a'" do
+      input = IO::Memory.new("a\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      outcome, edit = approval.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::AllSession)
+      edit.should be_nil
+    end
+
+    it "returns PrefixSession for 'p'" do
+      input = IO::Memory.new("p\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      outcome, edit = approval.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::PrefixSession)
+      edit.should be_nil
+    end
+
+    it "displays detailed help on '?' and reprompts" do
+      input = IO::Memory.new("?\ny\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      outcome, edit = approval.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
+      out_str = output.to_s
+      out_str.should contain("Approval options:")
+      out_str.should contain("Save exact command")
+      out_str.should contain("Save command prefix")
+    end
+
+    it "warns when command contains shell metacharacters" do
+      input = IO::Memory.new("y\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      approval.approve_command("git status; ls", ["git", "status;", "ls"], true, 30)
+      out_str = output.to_s
+      out_str.should contain("metacharacters cannot be saved")
+    end
   end
 end
