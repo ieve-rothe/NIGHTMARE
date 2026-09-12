@@ -129,4 +129,64 @@ describe Nightmare::UI::TurnPresenter do
     # Verify total lines fit within a 27-row terminal budget
     lines.size.should be <= 27
   end
+
+  it "renders mutations with correct success, rejection, and error badges" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Mutations test")
+
+    args = {"path" => JSON::Any.new("PROGRESS.md")}
+
+    # 1. Success
+    presenter.present_tool_result("append_to_file", args, "Successfully appended 42 bytes to PROGRESS.md")
+    clean1 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean1.should contain("✓")
+    clean1.should contain("MUTATION: APPEND_TO_FILE")
+    clean1.should contain("PROGRESS.md")
+    clean1.should contain("Successfully appended 42 bytes to PROGRESS.md")
+
+    # 2. Rejection
+    io.clear
+    presenter.present_tool_result("append_to_file", args, "[Execution rejected by user]")
+    clean2 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean2.should_not contain("✓")
+    clean2.should contain("⚠")
+    clean2.should contain("MUTATION: REJECTED")
+    clean2.should contain("PROGRESS.md")
+    clean2.should contain("execution rejected by user")
+
+    # 3. Error
+    io.clear
+    presenter.present_tool_result("replace_in_file", args, "[SecurityError: path escape]")
+    clean3 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean3.should_not contain("✓")
+    clean3.should contain("✗")
+    clean3.should contain("MUTATION: ERROR")
+    clean3.should contain("PROGRESS.md")
+  end
+
+  it "renders shell execution with correct rejection and failure badges" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Shell test")
+
+    args = {"command" => JSON::Any.new("rm -rf /")}
+
+    # 1. Rejection
+    presenter.present_tool_result("shell", args, "[Execution rejected by user]")
+    clean1 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean1.should_not contain("✓")
+    clean1.should contain("⚠")
+    clean1.should contain("EXEC: REJECTED")
+
+    # 2. Timeout/Failure
+    io.clear
+    presenter.present_tool_result("shell", args, "[Timeout after 60s]")
+    clean2 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean2.should_not contain("✓")
+    clean2.should contain("✗")
+    clean2.should contain("EXEC: FAILED")
+  end
 end

@@ -154,15 +154,31 @@ module Nightmare::UI
         end
       elsif name == "write_file" || name == "replace_in_file" || name == "append_to_file"
         path = args["path"]?.try(&.as_s?) || args["filepath"]?.try(&.as_s?) || "file"
-        tag = Theme.bracket_tag("MUTATION", name.upcase, Theme.success_icon)
-        @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        if result_str.starts_with?("[Execution rejected")
+          tag = Theme.bracket_tag("MUTATION", "REJECTED", Theme.status_tag)
+          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
+        elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("MUTATION", "ERROR", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        else
+          tag = Theme.bracket_tag("MUTATION", name.upcase, Theme.success_icon)
+          @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        end
         @output.flush
       elsif name == "shell"
         cmd = args["command"]?.try(&.as_s?) || "shell"
-        tag = Theme.bracket_tag("EXEC", "SHELL", Theme.status_tag)
-        @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET}"
-        result_str.strip.each_line do |line|
-          @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+        if result_str.starts_with?("[Execution rejected")
+          tag = Theme.bracket_tag("EXEC", "REJECTED", Theme.status_tag)
+          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
+        elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("[Timeout") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("EXEC", "FAILED", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        else
+          tag = Theme.bracket_tag("EXEC", "SHELL", Theme.status_tag)
+          @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET}"
+          result_str.strip.each_line do |line|
+            @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+          end
         end
         @output.flush
       else

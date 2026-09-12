@@ -16,7 +16,7 @@ describe Nightmare::UI::Approval do
       out_str = output.to_s
       out_str.should contain("--- Diff ---")
       out_str.should contain("------------")
-      out_str.should contain("Approve overwrite for Overwrite test.txt? [y/N/a]: ")
+      out_str.should contain("Approve Overwrite test.txt? [y/N/a]: ")
       out_str.should contain("-old line")
       out_str.should contain("+new line")
     end
@@ -50,6 +50,10 @@ describe Nightmare::UI::Approval do
       # 'yes'
       approval_yes = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("yes\n"), output: IO::Memory.new)
       approval_yes.approve_diff("diff", "desc").should be_true
+
+      # '?' displays help and reprompts
+      approval_help = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("?\ny\n"), output: IO::Memory.new)
+      approval_help.approve_diff("diff", "desc").should be_true
 
       # default rejection on blank/other
       approval_reject = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\n"), output: IO::Memory.new)
