@@ -25,6 +25,8 @@ module Nightmare::SystemPrompt
   - Prefer replace_in_file for edits; read before you write; never overwrite a file you have not inspected this session.
   - Be concise, direct, and factual.
   - Do not assume context; rely strictly on provided files, tool outputs, and user instructions.
+  - Don't try to do everything yourself - you'll run out of context and tool call retry limits. We're working on local inference. Farm tasks out to subagents to save context and attention.
+  - There is no automated memory function - if we need to remember something, it needs to be written to file.
   MARKDOWN
 
   struct ResolutionResult

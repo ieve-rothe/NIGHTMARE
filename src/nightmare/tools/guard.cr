@@ -10,6 +10,7 @@ require "../workspace/environment"
 module Nightmare::Tools
   class Guard
     getter env : Workspace::Environment
+    property files_targeted : Array(String)? = nil
 
     # Sensitive read glob patterns per ARCHITECTURE_R3 §4.1
     SENSITIVE_READ_PATTERNS = [
@@ -23,7 +24,7 @@ module Nightmare::Tools
       ".git/**"
     ]
 
-    def initialize(@env : Workspace::Environment)
+    def initialize(@env : Workspace::Environment, @files_targeted : Array(String)? = nil)
     end
 
     def root : String
@@ -55,14 +56,27 @@ module Nightmare::Tools
     end
 
     # Resolves a path for writing / mutation.
-    # Enforces containment within @root and unconditionally blocks protected paths.
-    # Raises SecurityError on traversal.
+    # Enforces containment within @root, checks files_targeted if configured,
+    # and unconditionally blocks protected paths.
+    # Raises SecurityError on traversal or target mismatch.
     def resolve_write(path : String) : String
       full = @env.sanitize_path(path)
       rel = Path.new(full).relative_to(@env.root).to_s
 
       if protected_path?(rel)
         raise SecurityError.new("[Refused: #{path} is a protected path]")
+      end
+
+      if targets = @files_targeted
+        unless targets.empty?
+          clean_rel = normalize_rel(rel)
+          allowed = targets.any? do |glob|
+            File.match?(glob, clean_rel) || File.match?(glob, File.basename(clean_rel))
+          end
+          unless allowed
+            raise SecurityError.new("Policy error: Path '#{clean_rel}' is not within allowed files_targeted: #{targets.join(", ")}. Propose adding it to proposed_targets if required.")
+          end
+        end
       end
 
       full

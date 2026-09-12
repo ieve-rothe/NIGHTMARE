@@ -18,13 +18,19 @@ module Nightmare::Harness
     getter tool_loop : ToolLoop
     getter retrier : Retrier
     property transcript : Transcript?
+    property max_iterations : Int32
+    property format_retries : Int32
+    property overflow_retries : Int32
 
     def initialize(
       @client : Mantle::Clients::Client,
       @tools : Array(Mantle::Tools::Tool),
       @tool_loop : ToolLoop,
       @retrier : Retrier = Retrier.new,
-      @transcript : Transcript? = nil
+      @transcript : Transcript? = nil,
+      @max_iterations : Int32 = Config::MAX_ITERATIONS,
+      @format_retries : Int32 = Config::FORMAT_RETRIES,
+      @overflow_retries : Int32 = Config::CONTEXT_OVERFLOW_RETRIES
     )
     end
 
@@ -69,8 +75,8 @@ module Nightmare::Harness
       @transcript.try &.record(active.user_message)
 
       wrapped_tools = wrap_tools_with_loop_detector(@tools, @tool_loop.loop_detector)
-      overflow_retries_remaining = Config::CONTEXT_OVERFLOW_RETRIES
-      format_retries_remaining = Config::FORMAT_RETRIES
+      overflow_retries_remaining = @overflow_retries
+      format_retries_remaining = @format_retries
 
       wrapped_stream = ->(chunk : String) {
         if @tool_loop.cancelled?
@@ -85,7 +91,7 @@ module Nightmare::Harness
         step = Mantle::Step.new(
           client: @client,
           tools: wrapped_tools,
-          max_iterations: Config::MAX_ITERATIONS,
+          max_iterations: @max_iterations,
           on_iteration: @tool_loop.on_iteration_hook
         )
 
@@ -166,7 +172,7 @@ module Nightmare::Harness
 
           # Check if turn exceeded shed trigger threshold:
           hardmax = @tool_loop.store.hardmax
-          trigger_threshold = (hardmax.to_f * Config::SHED_TRIGGER_RATIO).to_i
+          trigger_threshold = (hardmax.to_f * @tool_loop.shed_trigger_ratio).to_i
           total_chars = active.messages.sum { |m| (m.content || "").size }
           estimated = if pt = @tool_loop.last_prompt_tokens
             pt + @tool_loop.calibrator.estimate(total_chars)
@@ -179,6 +185,9 @@ module Nightmare::Harness
               active,
               current_tokens: estimated,
               hardmax: hardmax,
+              trigger_ratio: @tool_loop.shed_trigger_ratio,
+              keep_chars: @tool_loop.shed_keep_chars,
+              keep_verbatim: @tool_loop.shed_keep_verbatim,
               calibrator: @tool_loop.calibrator
             )
           end

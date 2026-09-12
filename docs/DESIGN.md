@@ -138,7 +138,7 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 | :--- | :--- |
 | `/add <path> [--lines S-E]` | Pin a file (or line range) into the live working set |
 | `/drop [path]` | Unpin one file, or all if omitted |
-| `/clear` | Wipe the conversational window; pinned files and system prompt survive |
+| `/clear` | Clear the screen and wipe the conversational window; pinned files and system prompt survive |
 | `/cls` | Clear the physical terminal screen |
 | `/save [path]` | Export the pristine, un-pruned transcript as Markdown |
 | `/prompt [edit]` | Show the active system prompt; `edit` opens `$EDITOR`, in memory only |

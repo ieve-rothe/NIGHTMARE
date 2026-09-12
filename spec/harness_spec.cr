@@ -106,4 +106,41 @@ describe "Nightmare Harness & Step Runner" do
       second_req_chars.should be < first_req_chars
     end
   end
+
+  describe "configurable max_iterations" do
+    it "honors custom max_iterations passed to StepRunner" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      call1 = Mantle::Clients::ToolCall.new(id: "c1", function: Mantle::Clients::ToolCallFunction.new(name: "dummy_tool", arguments: "{}"))
+      call2 = Mantle::Clients::ToolCall.new(id: "c2", function: Mantle::Clients::ToolCallFunction.new(name: "dummy_tool", arguments: "{}"))
+      call3 = Mantle::Clients::ToolCall.new(id: "c3", function: Mantle::Clients::ToolCallFunction.new(name: "dummy_tool", arguments: "{}"))
+
+      responses = [
+        Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+        Mantle::Clients::Response.new(content: nil, tool_calls: [call2]),
+        Mantle::Clients::Response.new(content: nil, tool_calls: [call3]),
+      ]
+      client = FakeClient.new(responses)
+
+      schema = Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+      func = Mantle::Tools::FunctionDefinition.new("dummy_tool", "Dummy tool", schema)
+      dummy_tool = Mantle::Tools::Tool.new(func) { |_args| "ok" }
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [dummy_tool],
+        tool_loop: tool_loop,
+        max_iterations: 2
+      )
+
+      store.start_turn("Test max iterations")
+      outcome = runner.run_turn
+
+      outcome.ok?.should be_false
+      outcome.error.not_nil!.kind.should eq(Nightmare::Harness::StepErrorKind::MaxIterationsReached)
+      client.call_count.should eq(2)
+    end
+  end
 end

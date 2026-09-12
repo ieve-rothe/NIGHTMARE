@@ -27,11 +27,19 @@ module Nightmare::Harness
     property? cancelled : Bool = false
     getter cumulative_spend : Int32 = 0
     getter last_prompt_tokens : Int32? = nil
+    getter spend_cap : Int32
+    getter shed_trigger_ratio : Float64
+    getter shed_keep_chars : Int32
+    getter shed_keep_verbatim : Int32
 
     def initialize(
       @store : Context::SlidingStore,
       @calibrator : Context::TokenEstimator,
-      @loop_detector : LoopDetector = LoopDetector.new
+      @loop_detector : LoopDetector = LoopDetector.new,
+      @spend_cap : Int32 = Config::TURN_SPEND_CAP_TOKENS,
+      @shed_trigger_ratio : Float64 = Config::SHED_TRIGGER_RATIO,
+      @shed_keep_chars : Int32 = Config::SHED_KEEP_CHARS,
+      @shed_keep_verbatim : Int32 = Config::SHED_KEEP_VERBATIM
     )
     end
 
@@ -71,8 +79,8 @@ module Nightmare::Harness
 
         if eval_tokens = last.eval_count
           @cumulative_spend += eval_tokens
-          if @cumulative_spend > Config::TURN_SPEND_CAP_TOKENS
-            raise SpendCapExceededException.new("Turn spend cap (#{Config::TURN_SPEND_CAP_TOKENS} tokens) exceeded")
+          if @cumulative_spend > @spend_cap
+            raise SpendCapExceededException.new("Turn spend cap (#{@spend_cap} tokens) exceeded")
           end
         end
       end
@@ -94,7 +102,7 @@ module Nightmare::Harness
       end
 
       hardmax = @store.hardmax
-      trigger_threshold = (hardmax.to_f * Config::SHED_TRIGGER_RATIO).to_i
+      trigger_threshold = (hardmax.to_f * @shed_trigger_ratio).to_i
 
       if estimated > trigger_threshold
         if active = @store.active_turn
@@ -102,9 +110,9 @@ module Nightmare::Harness
             active,
             current_tokens: estimated,
             hardmax: hardmax,
-            trigger_ratio: Config::SHED_TRIGGER_RATIO,
-            keep_chars: Config::SHED_KEEP_CHARS,
-            keep_verbatim: Config::SHED_KEEP_VERBATIM,
+            trigger_ratio: @shed_trigger_ratio,
+            keep_chars: @shed_keep_chars,
+            keep_verbatim: @shed_keep_verbatim,
             calibrator: @calibrator
           )
         end

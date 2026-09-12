@@ -5,6 +5,7 @@
 require "process"
 require "json"
 require "../config"
+require "../plan/run_state"
 require "./guard"
 require "./allowlist"
 
@@ -24,11 +25,20 @@ module Nightmare::Tools
     property approval_handler : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))?
     property active_side_effects : Array(String)?
     property current_pgid : Int64? = nil
+    property subagent_mode : Bool = false
+    property default_timeout_seconds : Int32
+    property max_timeout_seconds : Int32
+    property tool_output_max_bytes : Int32
+    property executed_commands : Array(Nightmare::Plan::ExecutedCommand) = [] of Nightmare::Plan::ExecutedCommand
 
     def initialize(
       @guard : Guard,
       @allowlist : Allowlist = Allowlist.new,
-      @approval_handler : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))? = nil
+      @approval_handler : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))? = nil,
+      @subagent_mode : Bool = false,
+      @default_timeout_seconds : Int32 = Config::SHELL_COMMAND_TIMEOUT_SECONDS,
+      @max_timeout_seconds : Int32 = Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
+      @tool_output_max_bytes : Int32 = Config::TOOL_OUTPUT_MAX_BYTES
     )
     end
 
@@ -42,8 +52,8 @@ module Nightmare::Tools
     def run_command(command : String, timeout_seconds : Int32? = nil) : String
       cmd_to_run = command
 
-      raw_to = timeout_seconds || Config::SHELL_COMMAND_TIMEOUT_SECONDS
-      clamped_to = Math.min(Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS, raw_to)
+      raw_to = timeout_seconds || @default_timeout_seconds
+      clamped_to = Math.min(@max_timeout_seconds, raw_to)
       effective_timeout_sec = Math.max(1, clamped_to)
 
       loop do
@@ -54,6 +64,14 @@ module Nightmare::Tools
         end
 
         return {error: "Command cannot be empty"}.to_json if argv.empty?
+
+        if @subagent_mode && argv.first? == "git"
+          subcmd = argv.skip(1).find { |arg| !arg.starts_with?('-') }
+          allowed_git = {"status", "diff", "log", "rev-parse", "show"}
+          if subcmd && !allowed_git.includes?(subcmd)
+            return {error: "Git mutation command '#{subcmd}' is forbidden in subagent mode. Only read-only inspection commands (git status, git diff, git log, git rev-parse) are permitted."}.to_json
+          end
+        end
 
         has_metachar = Allowlist.contains_metacharacters?(cmd_to_run)
         has_denylisted = Allowlist.has_denylisted_flags?(argv)
@@ -106,6 +124,10 @@ module Nightmare::Tools
     end
 
     private def execute_process_group(command_string : String, argv : Array(String), requested_timeout : Int32?) : String
+      start_time = Time.instant
+      timed_out = false
+      final_status : Process::Status? = nil
+
       timeout = if req = requested_timeout
         Math.min(req.seconds, Config::MAX_COMMAND_TIMEOUT)
       else
@@ -150,7 +172,7 @@ module Nightmare::Tools
 
       pgid = process.pid
       @current_pgid = pgid.to_i64
-      max_stream_bytes = Config::TOOL_OUTPUT_MAX_BYTES // 2
+      max_stream_bytes = @tool_output_max_bytes // 2
 
       stdout_io = IO::Memory.new
       stderr_io = IO::Memory.new
@@ -175,9 +197,6 @@ module Nightmare::Tools
           status = process.wait
           exit_status_channel.send(status)
         end
-
-        timed_out = false
-        final_status : Process::Status? = nil
 
         select
         when status = exit_status_channel.receive
@@ -210,12 +229,25 @@ module Nightmare::Tools
             io << "STDERR:\n"
             io << err_str
           end
-          if (st = final_status) && !st.success?
+          if (st = final_status) && !st.success? && st.normal_exit?
             io << "\n" unless io.empty? || out_str.ends_with?('\n') || err_str.ends_with?('\n')
             io << "[Process exited with code #{st.exit_code}]"
           end
         end
       ensure
+        duration_ms = (Time.instant - start_time).total_milliseconds.to_i64
+        exit_code = if (st = final_status) && st.normal_exit?
+                      st.exit_code
+                    elsif timed_out
+                      124
+                    else
+                      -1
+                    end
+        @executed_commands << Nightmare::Plan::ExecutedCommand.new(
+          cmd: argv,
+          exit_code: exit_code,
+          duration_ms: duration_ms
+        )
         @current_pgid = nil
       end
     end

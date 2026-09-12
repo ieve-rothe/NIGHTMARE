@@ -591,7 +591,7 @@ describe "Tier 1: Feature Coverage (Opaque-Box E2E)" do
       end
     end
 
-    it "TC-T1-F09-02: /clear wipes conversation without deleting pinned files" do
+    it "TC-T1-F09-02: /clear wipes conversation without deleting pinned files and clears screen" do
       Nightmare::E2E.require_repl!
       Nightmare::E2E.with_sandbox do |sandbox|
         session = Nightmare::E2E.spawn_nightmare(sandbox)
@@ -599,6 +599,7 @@ describe "Tier 1: Feature Coverage (Opaque-Box E2E)" do
         session.send_line("/exit")
         session.wait_exit
         session.stdout.should contain("cleared")
+        session.stdout.should contain("\e[2J\e[H")
       end
     end
 

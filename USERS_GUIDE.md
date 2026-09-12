@@ -243,7 +243,7 @@ NIGHTMARE provides operators with immediate command controls:
 | Command | Description |
 | :--- | :--- |
 | **`/help`** | Displays the slash command quick reference table. |
-| **`/clear`** | Clears the active conversation history from memory (pinned files remain). |
+| **`/clear`** | Clears the screen and active conversation history from memory (pinned files remain). |
 | **`/cls`** | Clears the ANSI terminal screen. |
 | **`/add <path>`** | Pins a workspace file into persistent system context. |
 | **`/drop [path]`** | Unpins a specified file, or all files if no path is given (alias: `/rm`). |

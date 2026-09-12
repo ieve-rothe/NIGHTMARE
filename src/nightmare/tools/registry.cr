@@ -25,11 +25,21 @@ module Nightmare::Tools
       @allowlist : Allowlist = Allowlist.new,
       diff_approval : Proc(String, String, Bool)? = nil,
       shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))? = nil,
-      pinned_files : Context::PinnedFiles? = nil
+      pinned_files : Context::PinnedFiles? = nil,
+      default_command_timeout : Int32 = Config::SHELL_COMMAND_TIMEOUT_SECONDS,
+      max_command_timeout : Int32 = Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
+      tool_output_max_bytes : Int32 = Config::TOOL_OUTPUT_MAX_BYTES
     )
       @read_only = ReadOnly.new(@guard, pinned_files)
       @mutation = Mutation.new(@guard, diff_approval)
-      @shell = Shell.new(@guard, @allowlist, shell_approval)
+      @shell = Shell.new(
+        guard: @guard,
+        allowlist: @allowlist,
+        approval_handler: shell_approval,
+        default_timeout_seconds: default_command_timeout,
+        max_timeout_seconds: max_command_timeout,
+        tool_output_max_bytes: tool_output_max_bytes
+      )
       @delegation = Delegation.new(client)
     end
 
@@ -50,6 +60,20 @@ module Nightmare::Tools
         build_append_to_file_tool,
         build_run_command_tool,
         build_ask_model_tool,
+      ]
+    end
+
+    # Builds toolset for subagents: omits recursive delegation tools
+    def build_subagent_tools : Array(Mantle::Tools::Tool)
+      [
+        build_list_files_tool,
+        build_search_tool,
+        build_read_file_tool,
+        build_file_info_tool,
+        build_write_file_tool,
+        build_replace_in_file_tool,
+        build_append_to_file_tool,
+        build_run_command_tool,
       ]
     end
 

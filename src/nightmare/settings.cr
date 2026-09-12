@@ -18,6 +18,21 @@ module Nightmare
     property top_p : Float64 = 0.95
     property max_tokens : Int32 = 4096
     property command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_TIMEOUT_SECONDS
+    property max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS
+    property tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES
+    property max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS
+    property turn_soft_cap : Int32 = Nightmare::Config::TURN_SOFT_CAP
+    property turn_spend_cap_tokens : Int32 = Nightmare::Config::TURN_SPEND_CAP_TOKENS
+    property loop_detect_threshold : Int32 = Nightmare::Config::LOOP_DETECT_THRESHOLD
+    property rate_limit_retries : Int32 = Nightmare::Config::RATE_LIMIT_RETRIES
+    property format_retries : Int32 = Nightmare::Config::FORMAT_RETRIES
+    property context_overflow_retries : Int32 = Nightmare::Config::CONTEXT_OVERFLOW_RETRIES
+    property token_hardmax : Int32 = Nightmare::Config::TOKEN_HARDMAX
+    property pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO
+    property shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO
+    property shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS
+    property shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM
+    property initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR
 
     def initialize(
       @model : String = Nightmare::Config::DEFAULT_MODEL,
@@ -27,7 +42,22 @@ module Nightmare
       @temperature : Float64 = 0.2,
       @top_p : Float64 = 0.95,
       @max_tokens : Int32 = 4096,
-      @command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_TIMEOUT_SECONDS
+      @command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_TIMEOUT_SECONDS,
+      @max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
+      @tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES,
+      @max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS,
+      @turn_soft_cap : Int32 = Nightmare::Config::TURN_SOFT_CAP,
+      @turn_spend_cap_tokens : Int32 = Nightmare::Config::TURN_SPEND_CAP_TOKENS,
+      @loop_detect_threshold : Int32 = Nightmare::Config::LOOP_DETECT_THRESHOLD,
+      @rate_limit_retries : Int32 = Nightmare::Config::RATE_LIMIT_RETRIES,
+      @format_retries : Int32 = Nightmare::Config::FORMAT_RETRIES,
+      @context_overflow_retries : Int32 = Nightmare::Config::CONTEXT_OVERFLOW_RETRIES,
+      @token_hardmax : Int32 = Nightmare::Config::TOKEN_HARDMAX,
+      @pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO,
+      @shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO,
+      @shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS,
+      @shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM,
+      @initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR
     )
     end
 

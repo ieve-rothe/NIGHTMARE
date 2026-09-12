@@ -26,6 +26,8 @@ require "./nightmare/context/pinned_files"
 require "./nightmare/context/shedder"
 require "./nightmare/context/sliding_store"
 require "./nightmare/transcript"
+require "./nightmare/plan"
+require "./nightmare/harness/subagent_runner"
 require "./nightmare/repl"
 
 module Nightmare

@@ -44,16 +44,16 @@ module Nightmare::Context
     end
 
     # Loads saved calibrator from cache or creates a new one
-    def self.load_or_create(cache_dir : String) : TokenEstimator
+    def self.load_or_create(cache_dir : String, initial_divisor : Float64 = Config::INITIAL_DIVISOR) : TokenEstimator
       path = File.join(cache_dir, "calibrator.json")
       if File.exists?(path)
         begin
           from_json(File.read(path))
         rescue
-          new
+          new(divisor: initial_divisor)
         end
       else
-        new
+        new(divisor: initial_divisor)
       end
     end
   end

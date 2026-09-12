@@ -24,7 +24,7 @@ It provides a predictable, low-fatigue agentic workflow anchored strictly to you
 ### Prerequisites
 
 - [Crystal](https://crystal-lang.org/) (>= 1.10)
-- [Ollama](https://ollama.com/) running locally (`http://127.0.0.1:11434`) with a model installed (e.g. `qwen2.5-coder:7b`, `huihui_ai/Qwen3.8-abliterated:latest`, `gemma4:26b`, etc.)
+- [Ollama](https://ollama.com/) running locally (`http://127.0.0.1:11434`) with a model installed (e.g. `qwen2.5-coder:7b`, `gemma4:26b`, etc.)
 
 ### Build
 

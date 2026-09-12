@@ -13,6 +13,21 @@ describe Nightmare::Settings do
     settings.top_p.should eq(0.95)
     settings.max_tokens.should eq(4096)
     settings.command_timeout_seconds.should eq(60)
+    settings.max_command_timeout_seconds.should eq(600)
+    settings.tool_output_max_bytes.should eq(65_536)
+    settings.max_iterations.should eq(25)
+    settings.turn_soft_cap.should eq(10)
+    settings.turn_spend_cap_tokens.should eq(200_000)
+    settings.loop_detect_threshold.should eq(3)
+    settings.rate_limit_retries.should eq(3)
+    settings.format_retries.should eq(1)
+    settings.context_overflow_retries.should eq(1)
+    settings.token_hardmax.should eq(12_000)
+    settings.pinned_budget_ratio.should eq(0.60)
+    settings.shed_trigger_ratio.should eq(0.85)
+    settings.shed_keep_chars.should eq(200)
+    settings.shed_keep_verbatim.should eq(2)
+    settings.initial_divisor.should eq(3.5)
   end
 
   it "bootstraps ~/.config/nightmare/config.json when no config exists" do
@@ -35,6 +50,21 @@ describe Nightmare::Settings do
       parsed["top_p"].as_f.should eq(0.95)
       parsed["max_tokens"].as_i.should eq(4096)
       parsed["command_timeout_seconds"].as_i.should eq(60)
+      parsed["max_command_timeout_seconds"].as_i.should eq(600)
+      parsed["tool_output_max_bytes"].as_i.should eq(65_536)
+      parsed["max_iterations"].as_i.should eq(25)
+      parsed["turn_soft_cap"].as_i.should eq(10)
+      parsed["turn_spend_cap_tokens"].as_i.should eq(200_000)
+      parsed["loop_detect_threshold"].as_i.should eq(3)
+      parsed["rate_limit_retries"].as_i.should eq(3)
+      parsed["format_retries"].as_i.should eq(1)
+      parsed["context_overflow_retries"].as_i.should eq(1)
+      parsed["token_hardmax"].as_i.should eq(12_000)
+      parsed["pinned_budget_ratio"].as_f.should eq(0.60)
+      parsed["shed_trigger_ratio"].as_f.should eq(0.85)
+      parsed["shed_keep_chars"].as_i.should eq(200)
+      parsed["shed_keep_verbatim"].as_i.should eq(2)
+      parsed["initial_divisor"].as_f.should eq(3.5)
     end
   end
 
@@ -81,6 +111,8 @@ describe Nightmare::Settings do
       disk_json["model"].as_s.should eq("custom-ollama:14b")
       disk_json["markdown"].as_bool.should be_true
       disk_json["max_tokens"].as_i.should eq(4096)
+      disk_json["max_iterations"].as_i.should eq(25)
+      disk_json["turn_soft_cap"].as_i.should eq(10)
     end
   end
 

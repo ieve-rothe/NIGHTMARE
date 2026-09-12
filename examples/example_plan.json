@@ -1,0 +1,61 @@
+{
+  "$schema": "https://nightmare.dev/schemas/plan-v1.json",
+  "schema_version": "1.0.0",
+  "id": "refactor-cli-args",
+  "goal": "Refactor CLI argument parsing to support --headless flag and config override",
+  "base_ref": "main",
+  "setup_command": ["shards", "install"],
+  "baseline_verification": {
+    "command": ["crystal", "spec"],
+    "parser": "exit_code",
+    "expected_known_failures": []
+  },
+  "max_run_duration_seconds": 14400,
+  "max_total_tokens": 500000,
+  "items": [
+    {
+      "id": "item-1",
+      "title": "Map OptionParser structure in cli.cr",
+      "prompt": "Inspect the CLI argument handling and document the flags in comments or structure.",
+      "profile_id": "researcher",
+      "depends_on": [],
+      "files_targeted": ["src/nightmare/cli.cr", "src/nightmare/commands/**"],
+      "verification": {
+        "kind": "none"
+      }
+    },
+    {
+      "id": "item-2",
+      "title": "Add headless configuration option to Environment",
+      "prompt": "Add headless property to Environment class and ensure defaults are preserved.",
+      "profile_id": "code_modifier",
+      "depends_on": ["item-1"],
+      "group_id": "cli-headless-txn",
+      "files_targeted": ["src/nightmare/workspace/environment.cr"],
+      "verification": {
+        "kind": "compile",
+        "command": ["crystal", "build", "--no-codegen", "src/nightmare.cr"]
+      },
+      "max_attempts": 3,
+      "budget_iterations": 10
+    },
+    {
+      "id": "item-3",
+      "title": "Wire --headless flag to CLI and add unit tests",
+      "prompt": "Add the --headless flag to OptionParser in src/nightmare.cr and add corresponding tests in spec/.",
+      "profile_id": "code_modifier",
+      "depends_on": ["item-2"],
+      "group_id": "cli-headless-txn",
+      "files_targeted": ["src/nightmare.cr", "spec/nightmare_spec.cr"],
+      "verification": {
+        "kind": "command",
+        "command": ["crystal", "spec", "spec/nightmare_spec.cr"],
+        "parser": "exit_code",
+        "expect": "pass",
+        "allows_test_removal": false
+      },
+      "max_attempts": 3,
+      "budget_iterations": 15
+    }
+  ]
+}

@@ -61,10 +61,13 @@ module Nightmare
       @model_name = @env.resolve_model(model_override)
 
       # 2. Persisted calibrator
-      @calibrator = Context::TokenEstimator.load_or_create(@env.workspace_cache_dir)
+      @calibrator = Context::TokenEstimator.load_or_create(@env.workspace_cache_dir, @env.settings.initial_divisor)
 
       # 3. Context engine
-      @store = Context::SlidingStore.new
+      @store = Context::SlidingStore.new(
+        soft_cap: @env.settings.turn_soft_cap,
+        hardmax: @env.settings.token_hardmax
+      )
       @pinned_files = Context::PinnedFiles.new
 
       # 4. Transcript
@@ -105,13 +108,35 @@ module Nightmare
         allowlist: @allowlist,
         diff_approval: diff_cb,
         shell_approval: shell_cb,
-        pinned_files: @pinned_files
+        pinned_files: @pinned_files,
+        default_command_timeout: @env.settings.command_timeout_seconds,
+        max_command_timeout: @env.settings.max_command_timeout_seconds,
+        tool_output_max_bytes: @env.settings.tool_output_max_bytes
       )
       tools = @registry.build_tools
 
       # 8. Harness
-      @tool_loop = Harness::ToolLoop.new(@store, @calibrator)
-      @step_runner = Harness::StepRunner.new(client, tools, @tool_loop, transcript: @transcript)
+      loop_detector = Harness::LoopDetector.new(threshold: @env.settings.loop_detect_threshold)
+      @tool_loop = Harness::ToolLoop.new(
+        store: @store,
+        calibrator: @calibrator,
+        loop_detector: loop_detector,
+        spend_cap: @env.settings.turn_spend_cap_tokens,
+        shed_trigger_ratio: @env.settings.shed_trigger_ratio,
+        shed_keep_chars: @env.settings.shed_keep_chars,
+        shed_keep_verbatim: @env.settings.shed_keep_verbatim
+      )
+      retrier = Harness::Retrier.new(max_retries: @env.settings.rate_limit_retries)
+      @step_runner = Harness::StepRunner.new(
+        client: client,
+        tools: tools,
+        tool_loop: @tool_loop,
+        retrier: retrier,
+        transcript: @transcript,
+        max_iterations: @env.settings.max_iterations,
+        format_retries: @env.settings.format_retries,
+        overflow_retries: @env.settings.context_overflow_retries
+      )
 
       # 9. UI & Commands
       @stream_ctrl = UI::StreamController.new
@@ -129,7 +154,8 @@ module Nightmare
         transcript: @transcript,
         current_prompt: prompt,
         current_model: @model_name,
-        on_model_change: on_model
+        on_model_change: on_model,
+        client: client
       )
     end
 
