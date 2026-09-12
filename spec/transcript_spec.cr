@@ -66,4 +66,33 @@ describe Nightmare::Transcript do
       end
     end
   end
+
+  describe "ghost mode memory-only operation (R7)" do
+    it "does not touch disk when enabled is false, but allows on-demand /save" do
+      with_temp_dir do |dir|
+        transcript = Nightmare::Transcript.new(dir, enabled: false)
+        disk_path = File.join(dir, "transcript.md")
+
+        transcript.file_path.should be_nil
+        File.exists?(disk_path).should be_false
+
+        transcript.record(Mantle::Message.new("user", "Secret query in memory"))
+        transcript.record(Mantle::Message.new("assistant", "Secret response in memory"))
+
+        # No transcript file on disk
+        File.exists?(disk_path).should be_false
+
+        # In-memory entries retained
+        transcript.entries.size.should eq(2)
+
+        # On-demand export via save_to still works
+        save_target = File.join(dir, "custom_export.md")
+        transcript.save_to(save_target)
+
+        File.exists?(save_target).should be_true
+        File.read(save_target).should contain("Secret query in memory")
+        File.read(save_target).should contain("Secret response in memory")
+      end
+    end
+  end
 end

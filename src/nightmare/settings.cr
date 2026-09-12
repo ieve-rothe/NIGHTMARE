@@ -13,6 +13,7 @@ module Nightmare
     property model : String = Nightmare::Config::DEFAULT_MODEL
     property api_url : String = "http://127.0.0.1:11434/api/chat"
     property markdown : Bool = true
+    property logging : Bool = true
     property temperature : Float64 = 0.2
     property top_p : Float64 = 0.95
     property max_tokens : Int32 = 4096
@@ -22,6 +23,7 @@ module Nightmare
       @model : String = Nightmare::Config::DEFAULT_MODEL,
       @api_url : String = "http://127.0.0.1:11434/api/chat",
       @markdown : Bool = true,
+      @logging : Bool = true,
       @temperature : Float64 = 0.2,
       @top_p : Float64 = 0.95,
       @max_tokens : Int32 = 4096,

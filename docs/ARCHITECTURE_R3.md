@@ -557,23 +557,28 @@ Two `Ctrl+C` in rapid succession at an empty prompt exits, as does `/exit` or EO
 
 ---
 
-## 6. Persistence Subsystem
+## 6. Persistence Subsystem **[R2, R7]**
 
 - **Config**: `$XDG_CONFIG_HOME/nightmare/workspaces/<workspace_id>/`
-  - `workspace.json` — metadata linking workspace ID to `@root`
+  - `workspace.json` — metadata linking workspace ID to `@root` (inhibited in ghost mode)
   - `prompt.md` — per-workspace system prompt
   - `allow` — persisted shell allowlist (token patterns; §4.2)
 - **State & Logs**: `$XDG_STATE_HOME/nightmare/workspaces/<workspace_id>/`
-  - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Disabled by `--no-log`.
-  - `transcript.md` — incrementally appended pristine transcript
+  - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Completely disabled by `--no-logs` or system configuration.
+  - `transcript.md` — incrementally appended pristine transcript (disk appends completely disabled by `--no-logs` or system configuration; RAM-only in ghost mode).
 - **Cache**: `$XDG_CACHE_HOME/nightmare/workspaces/<workspace_id>/`
-  - `calibrator.json` — persisted token divisor
+  - `calibrator.json` — persisted token divisor (inhibited in ghost mode)
 
 Zero files are written inside `@root`. `.nightmare/prompt.md`, if present, is read-only to NIGHTMARE and to the model (§4.1).
 
-`Transcript` appends each message to `transcript.md` as it is produced, `O_APPEND` and line-oriented, flushed per turn, with an in-memory mirror retained for `/save` and `/review`.
+`Transcript` appends each message to `transcript.md` as it is produced, `O_APPEND` and line-oriented, flushed per turn, with an in-memory mirror retained for `/save` and `/review`. When logging is disabled via `--no-logs` or system configuration, `Transcript` operates in memory-only mode and writes zero files to disk.
 
-`/save [path]` copies the on-disk transcript to the requested path (defaulting into the state dir). It exports the pristine, un-shed, un-pruned history.
+`/save [path]` copies the pristine, un-shed, un-pruned history to the requested path on demand.
+
+### Logging Control, Ghost Mode & Anti-Exfiltration Guarantees **[R7, D6]**
+- **Complete Log Suppression**: Passing `--no-logs` (or `--no-log`) suppresses all disk logs (`llm_calls.jsonl`) and incremental transcript appends (`transcript.md`), eliminating data exfiltration risks for sensitive code/prompts.
+- **Ghost Mode Zero Footprint**: Under `--no-logs`, NIGHTMARE leaves zero footprint under `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME`, and `$XDG_CACHE_HOME` (inhibiting `workspace.json`, bootstrapped `config.json`, and `calibrator.json`). All transient state runs in RAM.
+- **System-Level Configuration**: Setting `"logging": false` in `config.json` allows permanent suppression at a system/workspace level without CLI flags. Observability remains enabled by default.
 
 ---
 
@@ -602,6 +607,7 @@ All live in `Nightmare::Config` with per-workspace overrides in `$XDG_CONFIG_HOM
 | `MAX_COMMAND_TIMEOUT` | `600s` | Hard cap |
 | `PROCESS_GRACE_PERIOD` | `2s` | SIGTERM → SIGKILL interval |
 | `TOOL_OUTPUT_MAX_BYTES` | `65_536` | Per-tool output cap; split across stdout/stderr for `run_command` |
+| `logging` (Setting) | `true` | System/workspace setting in `config.json`. When `false` or `--no-logs`, disables disk audit logs and disk transcripts; ghost mode suppresses XDG config/cache footprints. |
 
 ---
 
@@ -609,6 +615,7 @@ All live in `Nightmare::Config` with per-workspace overrides in `$XDG_CONFIG_HOM
 
 | Operation | Nature | Deterministic Guard / Invariant | Failure Mode Encapsulation |
 | :--- | :--- | :--- | :--- |
+| **Audit Logging & State Persistence** | Deterministic | When `--no-logs` is passed or `logging: false` is configured, file sinks for `llm_calls.jsonl`, `transcript.md`, and XDG manifest/cache files are bypassed entirely. | Disk I/O avoided; zero possibility of file-permission failures or disk exfiltration. |
 | **Primary Turn LLM Stream** | Stochastic | `Mantle::Step` drives the loop; `Harness::ToolLoop` supplies the `on_iteration` hook that captures and rewrites the working buffer (§2.1). `Salamander::ChatSession` strips `<think>` from the live stream; `Response#thinking` carries the reasoning log for `/thinking`. | Client failure → `ClientFailure`. 429 → `RateLimited`, exponential backoff with jitter. Length rejection → `ContextOverflow`, emergency shed + one turn re-run. |
 | **Structured Output Parsing** | Stochastic | Typed boundary parses the raw completion immediately into a Crystal type. | Schema failure → `MalformedOutput`. Harness triggers a single format-correction retry, then returns typed error. |
 | **Model Delegation (`ask_model`)** | Stochastic | Stateless one-shot via `Mantle::Step` with **no** `on_iteration` hook (same local Ollama backend, fresh context); returns a self-contained `tool` message with no history contamination. | Model error encapsulated into the tool result string with a failure reason. Never propagates as a turn failure. |

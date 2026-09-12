@@ -24,6 +24,7 @@ module Nightmare::Workspace
     getter repo_prompt_path : String
     getter manifest : Manifest
     getter settings : Settings
+    getter? ensure_dirs : Bool
 
     def workspace_config_dir : String
       @config_dir
@@ -42,7 +43,7 @@ module Nightmare::Workspace
       xdg_config_home : String? = nil,
       xdg_state_home : String? = nil,
       xdg_cache_home : String? = nil,
-      ensure_dirs : Bool = true
+      @ensure_dirs : Bool = true
     )
       @root = File.realpath(root_path)
 
@@ -200,6 +201,11 @@ module Nightmare::Workspace
       return cli_override unless cli_override.nil?
       return false if ENV.has_key?("NO_COLOR")
       @settings.markdown
+    end
+
+    def resolve_logging(cli_no_log : Bool = false) : Bool
+      return false if cli_no_log
+      @settings.logging
     end
 
     private def resolve_xdg(env_var : String, param : String?, fallback : String) : String

@@ -54,6 +54,7 @@ module Nightmare
       markdown_override : Bool? = nil
     )
       @markdown_formatting = @env.resolve_markdown_formatting(markdown_override)
+      @no_log = @no_log || !@env.resolve_logging(cli_no_log: @no_log)
 
       # 1. System prompt resolution
       prompt = SystemPrompt::Resolver.resolve(@env, system_prompt_path)
@@ -67,7 +68,7 @@ module Nightmare
       @pinned_files = Context::PinnedFiles.new
 
       # 4. Transcript
-      @transcript = Transcript.new(@env.workspace_state_dir)
+      @transcript = Transcript.new(@env.workspace_state_dir, enabled: !@no_log)
 
       # 5. Security & tools
       @guard = Tools::Guard.new(@env)
@@ -230,7 +231,7 @@ module Nightmare
           assembled = @store.assemble_messages(@router.current_prompt, pinned_block)
           total_chars = assembled.sum { |m| m.content.try(&.size) || 0 }
           @calibrator.calibrate!(total_chars, prompt_tok)
-          @calibrator.save(@env.workspace_cache_dir)
+          @calibrator.save(@env.workspace_cache_dir) if @env.ensure_dirs? && !@no_log
         end
       else
         err = outcome.error.not_nil!

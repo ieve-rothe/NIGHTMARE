@@ -12,9 +12,9 @@ module Nightmare
     getter file_path : String?
     getter entries : Array(Mantle::Message)
 
-    def initialize(@state_dir : String? = nil)
+    def initialize(@state_dir : String? = nil, enabled : Bool = true)
       @entries = [] of Mantle::Message
-      if dir = @state_dir
+      if enabled && (dir = @state_dir)
         Dir.mkdir_p(dir) unless Dir.exists?(dir)
         @file_path = File.join(dir, "transcript.md")
       end

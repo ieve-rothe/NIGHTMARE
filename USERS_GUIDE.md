@@ -309,14 +309,30 @@ If an LLM call fails, the exact error reason (e.g. HTTP 404, context length exce
 #### Automatic Log Rotation
 The audit log automatically rotates when it reaches 20 MB, keeping up to 3 rotated archives (`llm_calls.jsonl.1`, `llm_calls.jsonl.2`, `llm_calls.jsonl.3`).
 
-### Transcript (`/save`)
+### Disabling Logs & Ghost Mode (`--no-logs`)
 
-Use the `/save` slash command to write the session's complete, un-truncated Markdown transcript:
+To prevent any data exfiltration of confidential repository code, queries, or model outputs to disk, run with `--no-logs`:
 
+```bash
+bin/nightmare --no-logs
 ```
-> /save session_notes.md
-Transcript saved to /home/cam/repos/adjutant/nightmare/session_notes.md
+
+When `--no-logs` is active, NIGHTMARE enters zero-footprint ghost mode:
+- **No LLM call logs**: `llm_calls.jsonl` is not written or created.
+- **No disk transcripts**: The incremental transcript is not written to `transcript.md` (retained in RAM only; `/save [path]` can still export on explicit command).
+- **No XDG footprint**: Does not create or update `workspace.json`, auto-bootstrapped `config.json`, or `calibrator.json` under `.config`, `.local/state`, or `.cache`.
+
+### Permanent Log Disabling (System Configuration)
+
+You can turn off logging permanently across all sessions by setting `"logging": false` in your global configuration (`~/.config/nightmare/config.json`) or workspace configuration (`~/.config/nightmare/workspaces/<workspace-id>/config.json`):
+
+```json
+{
+  "logging": false
+}
 ```
+
+*Default Stance:* Logging is enabled by default to ensure observability, session diagnostics, and crash-safe transcripts, unless explicitly disabled by configuration or the `--no-logs` flag.
 
 ---
 

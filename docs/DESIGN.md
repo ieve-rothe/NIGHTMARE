@@ -71,9 +71,9 @@ No character personas, no homeostatic drives, no background schedulers, no topic
 
 1. **Workspace-bound root.** Anchored to `Dir.current`, canonicalized once at boot. Every tool operation is confined within it; traversal and out-of-tree symlinks are rejected.
 2. **Zero repository litter.** No config, state, cache, or log file is ever written into the target repo. Everything persistent lives in XDG directories, partitioned per workspace.
-3. **Ephemeral by default, pristine on demand.** Conversational state is RAM-resident and evaporates on exit. A parallel un-pruned transcript is kept so `/save` writes a complete record with no truncation stubs.
+3. **Ephemeral by default, pristine on demand.** Conversational state is RAM-resident and evaporates on exit. A parallel un-pruned transcript is kept in memory (and incrementally flushed to disk unless logging is suppressed) so `/save` writes a complete record with no truncation stubs.
 4. **Turn-unit pruning and in-turn shedding.** Pruning operates on atomic turn units. Within a running turn, older *consumed* tool outputs are compressed so a long tool loop cannot exhaust the window mid-task. The user's instruction is never touched.
-5. **Honest observability.** Raw exchanges are logged centrally. Token meters self-calibrate against provider usage and are always shown with a tilde (`~2,160t`) because they are estimates.
+5. **Honest observability, complete suppressibility.** Raw exchanges are logged centrally by default for auditability and debugging. Token meters self-calibrate against provider usage and are always shown with a tilde (`~2,160t`) because they are estimates. Observability must never become a forced exfiltration vector: when disabled via `--no-logs` or persistent configuration, zero logs, transcripts, or data access traces are written to disk.
 6. **Rigorous security, anti-fatigue approval.** Read-only tools run silently. Mutations auto-approve new files but require a diff and consent to overwrite. Shell execution is argv-only with explicit approval controls and a hard ban on auto-approving metacharacters. **Approval fatigue is a security failure**: a user who reflexively types `y` has no boundary at all, so the design spends its approval budget only where consequences are real.
 7. **The human is the supervisor, not the operator.** The agent proposes and executes; the human retains a veto at every irreversible step and can interrupt any turn without losing the session.
 
@@ -83,9 +83,9 @@ No character personas, no homeostatic drives, no background schedulers, no topic
 
 Authoritative statement of requirements. `.agents/ORIGINAL_REQUEST.md` holds the original user phrasing and acceptance criteria.
 
-**R1 — Workspace anchoring and central XDG mapping.** Anchor to the realpath of `Dir.current`; prevent all operations outside it. Persist config, state, and cache in central XDG directories keyed by a deterministic per-workspace identifier. Never write inside the target repo. Print a startup banner showing root, config, and state paths. Resolve system prompt in strict precedence: CLI flag → repo override → workspace config → global config → default persona.
+**R1 — Workspace anchoring and central XDG mapping.** Anchor to the realpath of `Dir.current`; prevent all operations outside it. Persist config, state, and cache in central XDG directories keyed by a deterministic per-workspace identifier. Never write inside the target repo. Print a startup banner showing root, config, and state paths. Resolve system prompt in strict precedence: CLI flag → repo override → workspace config → global config → default persona. Subject to ghost-mode zero-footprint constraints (R7).
 
-**R2 — Ephemeral context engine, turn-unit pruning, in-turn shedding.** Keep context in memory as an atomic turn-unit sliding window. Pruning must never orphan a tool pair and never evict the active turn's user prompt. When approaching token limits during multi-step tool iterations, compress older consumed tool results within the active turn while preserving the most recent verbatim. Self-calibrate token estimation from provider usage feedback. Maintain a parallel un-pruned transcript for `/save`.
+**R2 — Ephemeral context engine, turn-unit pruning, in-turn shedding.** Keep context in memory as an atomic turn-unit sliding window. Pruning must never orphan a tool pair and never evict the active turn's user prompt. When approaching token limits during multi-step tool iterations, compress older consumed tool results within the active turn while preserving the most recent verbatim. Self-calibrate token estimation from provider usage feedback. Maintain a parallel un-pruned transcript for `/save` (disk append governed by R7).
 
 **R3 — Sandboxed tool suite and anti-fatigue approval boundary.** Read-only observation tools run autonomously, excluding `.git/` and sensitive files. Mutation tools auto-approve new file creation but require a unified diff and approval to modify existing files; writes to `.git/` are forbidden. Provide stateless model delegation. Provide shell execution with process group isolation, a hard timeout cap, closed stdin, and an interactive approval modal, with a strict ban on auto-approving any command containing shell metacharacters.
 
@@ -94,6 +94,13 @@ Authoritative statement of requirements. `.agents/ORIGINAL_REQUEST.md` holds the
 **R5 — Interactive Salamander REPL and slash command router.** Terminal REPL with live token streaming, spinner management, `<think>` isolation, and ANSI markdown formatting. `Ctrl+C` during generation cancels and rolls back the active turn without terminating the session. Support the commands in §5.
 
 **R6 — Framework integration constraints.** Link `mantle` and `salamander` by local path. Minor backward-compatible enhancements to either are permitted where strictly necessary; major structural refactoring is prohibited.
+
+**R7 — Zero-footprint logging control, data exfiltration prevention, and ghost mode.** Provide strict privacy and anti-exfiltration guarantees when logging is disabled:
+- **Complete Log Suppression (`--no-logs`)**: When `--no-logs` (or `--no-log`) is passed, or logging is disabled via configuration, write NO logs of any kind to disk. This suppresses both `llm_calls.jsonl` (raw prompts, completions, tool call payloads, latency, and errors) and the incremental transcript (`transcript.md`). The un-pruned transcript remains purely RAM-resident for in-session inspection and explicit export via `/save [path]`.
+- **Anti-Exfiltration Guarantee**: Prevent data exfiltration of confidential repository code, tool outputs, user instructions, and model completions to local disk logs or unencrypted shared filesystems.
+- **Ghost Mode Zero Footprint**: When running with `--no-logs`, NIGHTMARE must leave no persistent footprint under `$XDG_CONFIG_HOME` (inhibit writing `workspace.json` and auto-bootstrapping `config.json`), `$XDG_STATE_HOME`, or `$XDG_CACHE_HOME` (`calibrator.json`). Ephemeral session state and calibration operate purely in RAM and evaporate on exit.
+- **System-Level Persistent Configuration**: Surface a configuration option (`logging: false` in `config.json`) allowing users and administrators to permanently turn off logs at a system or workspace level without requiring CLI flags.
+- **Observability Default**: Logging remains enabled by default to maintain operational visibility and crash-safe transcripts, but yields unconditionally to `--no-logs` or configuration overrides.
 
 ### R2 addendum — why in-turn shedding exists
 
@@ -119,7 +126,9 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 
 **Interruption.** `Ctrl+C` during a turn cancels it and rolls the turn back; the session survives and the typed input is returned for editing. Because rollback cannot undo files already written or commands already run, the next message states plainly what was modified before the interrupt. Exiting requires `/exit`, `Ctrl+D`, or two rapid `Ctrl+C` at an empty prompt.
 
-**Transparency.** `/review` shows the exact prompt assembly currently being dispatched. `/thinking` shows the last hidden reasoning block. `/save` exports the pristine transcript. Raw exchanges are logged centrally unless `--no-log`.
+**Transparency.** `/review` shows the exact prompt assembly currently being dispatched. `/thinking` shows the last hidden reasoning block. `/save` exports the pristine transcript. Raw exchanges are logged centrally unless `--no-logs` is supplied or disabled via configuration.
+
+**Ghost Mode & Anti-Exfiltration.** When started with `--no-logs`, NIGHTMARE operates in zero-footprint ghost mode. It suppresses all disk logging (`llm_calls.jsonl` and `transcript.md`) and leaves no persistent footprint under `$XDG_CONFIG_HOME` (no `workspace.json`, no bootstrapped `config.json`), `$XDG_STATE_HOME`, or `$XDG_CACHE_HOME` (`calibrator.json`). Ephemeral state lives exclusively in RAM, guaranteeing zero data exfiltration of repository content or interactions.
 
 ---
 
@@ -140,6 +149,8 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 | `/help` | Command syntax and keybindings |
 | `/exit` | End the session; ephemeral state evaporates |
 
+*CLI Flags:* `--no-logs` (or `--no-log`) triggers zero-footprint ghost mode, disabling all disk logs and XDG persistence.
+
 ---
 
 ## 6. MVP Boundary
@@ -148,7 +159,7 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 
 1. **Core runtime and XDG mapping** — canonical root, per-workspace XDG partitioning, startup banner, system prompt precedence.
 2. **Context engine** — turn-unit pruning, in-turn shedding, self-calibrating token meter. No long-term memory store.
-3. **Pristine transcript** — parallel un-pruned history, exported via `/save`, durable against a crash.
+3. **Pristine transcript** — parallel un-pruned history, exported via `/save`, durable against a crash (RAM-only when logging disabled).
 4. **Read-only tools** — `list_files`, `search`, `read_file`, `file_info`; autonomous, root-contained, sensitive patterns excluded.
 5. **Mutation tools** — `replace_in_file`, `append_to_file`, `write_file`; root-contained, protected paths enforced, diff-and-approve on overwrite.
 6. **Shell execution** — `run_command`, argv-only, process group isolation, timeout cap, closed stdin, approval modal.
@@ -156,7 +167,7 @@ What a user actually sees. Mechanisms behind each are in `ARCHITECTURE.md`.
 8. **Pinned files** — `/add` with raw and line-range slices, live re-read, redundancy short-circuit, `/drop`.
 9. **Salamander UI** — streaming, spinner teardown, `<think>` isolation, `Ctrl+C` turn rollback, ANSI markdown.
 10. **Commands** — as listed in §5.
-11. **Audit log** — per-workspace JSONL under `$XDG_STATE_HOME`, rotated, disableable.
+11. **Audit log & privacy controls** — per-workspace JSONL under `$XDG_STATE_HOME`, rotated, disableable. `--no-logs` flag and persistent `logging: false` configuration ensure zero data exfiltration by completely suppressing disk audit logs and incremental transcript writes, while leaving no footprint under `$XDG_CONFIG_HOME` or `$XDG_CACHE_HOME` in ghost mode. Enabled by default for observability.
 
 ### Explicitly deferred to v2
 

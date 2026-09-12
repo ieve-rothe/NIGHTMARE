@@ -627,27 +627,48 @@ Two `Ctrl+C` in rapid succession at an empty prompt exits, as does `/exit` or EO
 
 ---
 
-## 6. Persistence Subsystem **[R2]**
+## 6. Persistence Subsystem **[R2, R7]**
 
 ### Central XDG Isolation
 
 - **Config**: `$XDG_CONFIG_HOME/nightmare/workspaces/<workspace_id>/`
-  - `workspace.json` — metadata linking workspace ID to `@root`
+  - `workspace.json` — metadata linking workspace ID to `@root` (inhibited in ghost mode)
   - `prompt.md` — per-workspace system prompt
   - `allow` — persisted shell allowlist (token patterns; §4.2)
 - **State & Logs**: `$XDG_STATE_HOME/nightmare/workspaces/<workspace_id>/`
-  - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Disabled by `--no-log`.
-  - `transcript.md` — **[R2]** incrementally appended pristine transcript
+  - `llm_calls.jsonl` — audit log of raw prompts, completions, latency. Rotates at 20 MB, 3 retained. Completely disabled by `--no-logs` or system configuration.
+  - `transcript.md` — **[R2]** incrementally appended pristine transcript (disk appends completely disabled by `--no-logs` or system configuration; RAM-only in ghost mode).
 - **Cache**: `$XDG_CACHE_HOME/nightmare/workspaces/<workspace_id>/`
-  - `calibrator.json` — persisted token divisor
+  - `calibrator.json` — persisted token divisor (inhibited in ghost mode)
 
 Zero files are written inside `@root`. `.nightmare/prompt.md`, if present, is read-only to NIGHTMARE and to the model (§4.1).
 
-### Transcript: incremental, not in-memory-only
+### Transcript: incremental persistence vs. ghost mode
 
-The previous revision kept the transcript as an in-memory string buffer, so a crash lost it — including the crash you most want to read. **`Transcript` appends each message to `$XDG_STATE_HOME/.../transcript.md` as it is produced**, with an in-memory mirror retained for `/save` and `/review`. Appends are `O_APPEND` line-oriented and flushed per turn.
+In normal operation, **`Transcript` appends each message to `$XDG_STATE_HOME/.../transcript.md` as it is produced**, with an in-memory mirror retained for `/save` and `/review`. Appends are `O_APPEND` line-oriented and flushed per turn to ensure crash resilience.
 
-`/save [path]` becomes a copy of the on-disk transcript to the requested path (defaulting into the state dir). It exports the **pristine, un-shed, un-pruned** history: shedding rewrites `Turn#messages`, and `Transcript` captured the full content at append time, so `/save` is unaffected by any amount of shedding or eviction. This is asserted by a spec.
+However, when logging is disabled via `--no-logs` or system configuration, **`Transcript` operates in memory-only mode**: `file_path` is `nil`, no file handle is opened, and nothing is appended to disk. `/save [path]` still operates by writing the in-memory transcript directly to the user-specified destination path on demand.
+
+### Logging Control, Ghost Mode & Anti-Exfiltration Guarantees **[R7, D6]**
+
+1. **Threat Model & Anti-Exfiltration**:
+   In sensitive development environments, LLM prompt and completion logs (`llm_calls.jsonl`) or session transcripts (`transcript.md`) may record confidential proprietary code, tokens, internal API responses, or sensitive queries. If stored on disk, these artifacts represent a persistent data exfiltration vector.
+2. **Complete Log Suppression (`--no-logs`)**:
+   Passing `--no-logs` (or `--no-log`) disables all disk logging completely:
+   - `Mantle::Clients::LoggingClient` is omitted or bypassed; no `llm_calls.jsonl` is opened or written.
+   - `Transcript` does not open or append to `transcript.md`.
+   - Zero logs or data access traces are persisted to disk.
+3. **Ghost Mode Zero Footprint**:
+   Beyond suppressing audit logs and transcripts, "ghost mode" ensures NIGHTMARE leaves zero footprint on disk:
+   - Inhibit creation of `$XDG_CONFIG_HOME/nightmare/workspaces/<workspace_id>/` (no `workspace.json` manifest, no auto-bootstrapping of `config.json`).
+   - Inhibit creation of `$XDG_CACHE_HOME/.../calibrator.json` (token calibration divisor operates ephemerally in RAM).
+   - Inhibit creation of `$XDG_STATE_HOME/...` directories.
+   - All session state, context buffers, and tokens evaporate entirely from RAM upon process exit.
+4. **Permanent System-Level Configuration**:
+   A boolean setting `"logging": false` in `config.json` (at either the global level `$XDG_CONFIG_HOME/nightmare/config.json` or workspace level) allows users to permanently disable logging without needing to pass `--no-logs` on every invocation.
+5. **Precedence & Default Stance**:
+   - `CLI flag (--no-logs)` > `workspace config.json` > `global config.json` > default.
+   - Default: `logging = true`. Logs remain enabled by default for observability, troubleshooting, and crash-safe transcripts, but yield unconditionally when suppressed.
 
 ---
 
@@ -655,6 +676,7 @@ The previous revision kept the transcript as an in-memory string buffer, so a cr
 
 | Operation | Nature | Deterministic Guard / Invariant | Failure Mode Encapsulation |
 | :--- | :--- | :--- | :--- |
+| **Audit Logging & State Persistence** | Deterministic | When `--no-logs` is passed or `logging: false` is configured, file sinks for `llm_calls.jsonl`, `transcript.md`, and XDG manifest/cache files are bypassed entirely. | Disk I/O avoided; zero possibility of file-permission failures or disk exfiltration. |
 | **Primary Turn LLM Stream** | Stochastic | `Mantle::Step` drives the loop; `Harness::ToolLoop` supplies the `on_iteration` hook that captures and rewrites the working buffer (§2.1, D1). `Salamander::ChatSession` strips `<think>` from the live stream; `Response#thinking` carries the reasoning log for `/thinking`. | Client failure → `ClientFailure`. 429 → `RateLimited`, exponential backoff with jitter. Length rejection → `ContextOverflow`, emergency shed + one turn re-run. |
 | **Structured Output Parsing** | Stochastic | Typed boundary parses the raw completion immediately into a Crystal type. | Schema failure → `MalformedOutput`. Harness triggers a single format-correction retry, then returns typed error. |
 | **Model Delegation (`ask_model`)** | Stochastic | Stateless one-shot via `Mantle::Step` with **no** `on_iteration` hook (same local Ollama backend, fresh context); returns a self-contained `tool` message with no history contamination. | Model error encapsulated into the tool result string with a failure reason. Never propagates as a turn failure. |
@@ -695,10 +717,11 @@ Previously undefined or scattered. Single source of truth; all live in `Nightmar
 | `MAX_COMMAND_TIMEOUT` | `600s` | Hard cap |
 | `PROCESS_GRACE_PERIOD` | `2s` | SIGTERM → SIGKILL interval |
 | `TOOL_OUTPUT_MAX_BYTES` | `65_536` | Per-tool output cap; split across stdout/stderr for `run_command` |
+| `logging` (Setting) | `true` | System/workspace setting in `config.json`. When `false` or overridden by `--no-logs`, completely disables disk audit logs (`llm_calls.jsonl`) and disk transcripts (`transcript.md`); ghost mode suppresses XDG config/cache footprints. |
 
 ---
 
-## 9. Invariant Test Contract **[R2]**
+## 9. Invariant Test Contract **[R2, R7]**
 
 Nothing in the previous revision said how correctness was to be verified, which left every autonomous agent to invent its own bar. These are **coordination points**: a red test is a far better contract than prose. They are required before the corresponding milestone can gate.
 
@@ -720,19 +743,21 @@ Nothing in the previous revision said how correctness was to be verified, which 
 | **T12** | **`Cancelled` is not a failure.** Cancellation mid-stream rolls back the turn, leaves the store `well_formed?`, does not invoke the `Retrier`, and does not terminate the session. |
 | **T13** | **Side-effect note survives rollback.** A turn that wrote `a.cr` and is then cancelled causes the next user message to carry the interruption note. |
 | **T14** | **`/save` exports pristine history.** Shed and prune aggressively; the exported transcript still contains the full untruncated tool outputs. |
-| **T15** | **Transcript survives a crash.** Kill the process mid-turn; `transcript.md` contains the committed turns. |
+| **T15** | **Transcript survives a crash.** Kill the process mid-turn; `transcript.md` contains the committed turns (when logging is enabled). |
 | **T16** | **Loop detection.** Identical `(tool, args)` `LOOP_DETECT_THRESHOLD` times yields a refusal tool result and no execution. |
 | **T17** | **Calibration math.** Divisor converges per the EMA formula, clamps at both bounds, and tolerates `prompt_eval_count == nil` on every response without dividing by zero. |
 | **T18** | **Zero repo litter.** After a full scripted session, `@root` contains exactly the files the session intentionally wrote — no config, no logs, no transcript. (Already implemented as `WorkspaceSandbox#assert_zero_repo_litter!`.) |
 | **T19** | **`/prompt edit` is memory-only.** The system prompt changes; every on-disk prompt source is byte-identical afterward. |
+| **T20** | **Zero disk footprint under `--no-logs` (Ghost mode).** Starting with `--no-logs` writes nothing to `$XDG_STATE_HOME`, `$XDG_CONFIG_HOME`, or `$XDG_CACHE_HOME`. No `llm_calls.jsonl`, no `transcript.md`, no `workspace.json`, no `calibrator.json`. `Transcript` captures turns in memory only; `/save [path]` writes only if explicitly requested. |
+| **T21** | **System config log suppression.** Setting `"logging": false` in `config.json` disables disk audit logging (`llm_calls.jsonl`) and incremental transcript writes (`transcript.md`) without requiring CLI flags. Observability remains enabled when `logging: true`. |
 
 Unit specs must stay fast — no network, no sleeps, no compiler invocations. Process-level e2e specs gate behind the memoized `Nightmare::E2E.repl_ready?` probe so that unimplemented milestones report `pending!` immediately rather than accumulating timeouts.
 
 ---
 
-## 10. Design Decisions **[R2]**
+## 10. Design Decisions **[R2, R7]**
 
-**All five are settled as of 2026-09-11.** Build on them; none is an open question for an implementing agent.
+**All six are settled as of 2026-09-11.** Build on them; none is an open question for an implementing agent.
 
 | ID | Question | Resolution |
 | :--- | :--- | :--- |
@@ -741,10 +766,19 @@ Unit specs must stay fast — no network, no sleeps, no compiler invocations. Pr
 | **D3** | Salamander is line-buffered with no raw mode (§2.5). `[y]`/`[N]`/`[a]` single-keypress modals are not available. | **RESOLVED — line mode.** Type the letter, press Enter; empty input is the `[N]` default. No termios work in v1. Modal prompts must read as line input, not as keypress hints. |
 | **D4** | argv vs. `sh -c` for `run_command`. | **RESOLVED — argv only** (§4.2). Pipes and redirects will not work; that is the intended trade. If shell features are later required, they belong behind an explicitly-approved, never-auto-approvable `run_shell` tool, not as a widening of `run_command`. |
 | **D5** | Pinned files before or after history (§ Pipeline 2). | **RESOLVED — before history**, accepting prompt-cache invalidation whenever the model edits a pinned file. Correctness over cache locality. Revisit only if cache cost shows up in the audit log. |
+| **D6** | Complete log suppression, ghost mode zero-footprint, and system config (R7). | **RESOLVED — `--no-logs` suppresses all disk logs including transcript; ghost mode avoids leaving `.config` footprints; `logging: false` in `config.json` allows permanent system-level suppression; default remains enabled for observability.** Prevents data exfiltration of repository files, prompts, and model responses to disk. In ghost mode, directory creation and manifest/calibrator persistence are inhibited (`ensure_dirs: false`), operating ephemerally in RAM. |
 
 ---
 
 ## 11. Change Log
+
+### Revision 2.1 — 2026-09-11: Logging Control, Ghost Mode & Anti-Exfiltration (R7, D6)
+
+Clarified user need and architectural specification for logging suppression and ghost mode:
+- Added R7 and D6 establishing complete disk logging suppression under `--no-logs` (no `llm_calls.jsonl` audit log, no `transcript.md` on disk; transcript is in-memory only).
+- Specified "ghost mode" zero-footprint behavior: suppresses creating `$XDG_CONFIG_HOME` manifests (`workspace.json`), bootstrapped `config.json`, or cache files (`calibrator.json`). Ephemeral state resides purely in RAM.
+- Documented persistent system-level configuration option (`logging: false` in `config.json`), while maintaining logging enabled by default for observability.
+- Added invariants T20 and T21 to the verification test contract.
 
 ### Revision 2 — 2026-09-11
 

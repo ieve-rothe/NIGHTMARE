@@ -8,6 +8,7 @@ describe Nightmare::Settings do
     settings.model.should eq(Nightmare::Config::DEFAULT_MODEL)
     settings.api_url.should eq("http://127.0.0.1:11434/api/chat")
     settings.markdown.should be_true
+    settings.logging.should be_true
     settings.temperature.should eq(0.2)
     settings.top_p.should eq(0.95)
     settings.max_tokens.should eq(4096)
@@ -28,11 +29,24 @@ describe Nightmare::Settings do
       parsed = JSON.parse(File.read(global_file))
       parsed["model"].as_s.should eq(Nightmare::Config::DEFAULT_MODEL)
       parsed["markdown"].as_bool.should be_true
+      parsed["logging"].as_bool.should be_true
       parsed["api_url"].as_s.should eq("http://127.0.0.1:11434/api/chat")
       parsed["temperature"].as_f.should eq(0.2)
       parsed["top_p"].as_f.should eq(0.95)
       parsed["max_tokens"].as_i.should eq(4096)
       parsed["command_timeout_seconds"].as_i.should eq(60)
+    end
+  end
+
+  it "does not bootstrap config.json when ensure_dirs is false" do
+    with_temp_dir do |dir|
+      ws_dir = File.join(dir, "ws_config")
+      global_dir = File.join(dir, "global_config")
+      global_file = File.join(global_dir, "config.json")
+
+      settings = Nightmare::Settings.load_or_bootstrap(ws_dir, global_dir, ensure_dirs: false)
+      File.exists?(global_file).should be_false
+      settings.logging.should be_true
     end
   end
 
