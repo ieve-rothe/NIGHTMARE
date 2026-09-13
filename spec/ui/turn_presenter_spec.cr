@@ -189,4 +189,96 @@ describe Nightmare::UI::TurnPresenter do
     clean2.should contain("✗")
     clean2.should contain("EXEC: FAILED")
   end
+
+  it "renders the last agent response as a first-class card and truncates when long" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(
+      calibrator: calibrator,
+      output: io,
+      max_response_lines: 4
+    )
+
+    # 1. Short response fits in card
+    presenter.reset_for_new_turn("Check progress", "I inspected the configuration and everything looks ready.")
+    presenter.record_file_open("dummy.cr", "1\n2\n3\n")
+    presenter.render_dashboard(action_label: "test")
+
+    clean1 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean1.should contain("AGENT RESPONSE")
+    clean1.should contain("I inspected the configuration and everything looks ready.")
+    clean1.should_not contain("earlier lines hidden")
+
+    # 2. Long response truncates with notice
+    io.clear
+    long_response = (1..10).map { |i| "Explanation paragraph #{i} with detailed analysis" }.join("\n")
+    presenter.last_agent_response = long_response
+    presenter.render_dashboard(action_label: "test")
+
+    clean2 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean2.should contain("AGENT RESPONSE")
+    clean2.should contain("earlier lines hidden")
+    clean2.should contain("Explanation paragraph 10")
+    clean2.should_not contain("Explanation paragraph 1 with")
+  end
+
+  it "renders live subagent telemetry in the dashboard when subagent is active" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Run autonomous research")
+
+    telemetry = Nightmare::UI::SubagentTelemetry.new(
+      task: "Deep dive into AST parsing",
+      iteration: 3,
+      max_iterations: 12,
+      active_tool: "read_file(parser.cr)",
+      last_thought: "Let me check the token definitions next",
+      tool_calls_count: 5,
+      files_touched: ["src/parser.cr", "src/lexer.cr"]
+    )
+    presenter.active_subagent = telemetry
+    presenter.render_dashboard(action_label: "subagent")
+
+    clean = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean.should contain("SUBAGENT ENGAGED")
+    clean.should contain("ITER 3/12 ∷ 5 TOOLS")
+    clean.should contain("Deep dive into AST parsing")
+    clean.should contain("read_file(parser.cr)")
+    clean.should contain("Let me check the token definitions next")
+    clean.should contain("src/parser.cr, src/lexer.cr")
+  end
+
+  it "formats file_info, search, and list_files cleanly instead of dumping raw JSON" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Inspect metadata")
+
+    # 1. file_info
+    raw_info = %({"path":"src/main.cr","size_bytes":2048,"lines":80})
+    presenter.present_tool_result("file_info", {"path" => JSON::Any.new("src/main.cr")}, raw_info)
+    clean_info = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean_info.should contain("INFO")
+    clean_info.should contain("src/main.cr")
+    clean_info.should contain("2.0 KB · 80L")
+    clean_info.should_not contain(%("size_bytes":2048))
+
+    # 2. search
+    io.clear
+    presenter.present_tool_result("search", {"pattern" => JSON::Any.new("def run")}, "src/a.cr:10:def run\nsrc/b.cr:20:def run")
+    clean_search = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean_search.should contain("SEARCH")
+    clean_search.should contain("'def run'")
+    clean_search.should contain("2 match lines")
+
+    # 3. list_files
+    io.clear
+    presenter.present_tool_result("list_files", {"path" => JSON::Any.new("src")}, "a.cr\nb.cr\nc.cr")
+    clean_list = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean_list.should contain("LIST")
+    clean_list.should contain("src")
+    clean_list.should contain("3 entries")
+  end
 end
+

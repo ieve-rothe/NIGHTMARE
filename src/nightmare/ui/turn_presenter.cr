@@ -19,9 +19,33 @@ module Nightmare::UI
     read_range : String,
     content : String
 
+  class SubagentTelemetry
+    property task : String
+    property iteration : Int32
+    property max_iterations : Int32
+    property active_tool : String?
+    property last_thought : String?
+    property tool_calls_count : Int32
+    property files_touched : Array(String)
+
+    def initialize(
+      @task : String,
+      @max_iterations : Int32,
+      @iteration : Int32 = 1,
+      @active_tool : String? = nil,
+      @last_thought : String? = nil,
+      @tool_calls_count : Int32 = 0,
+      @files_touched : Array(String) = [] of String
+    )
+    end
+  end
+
   class TurnPresenter
     property current_user_prompt : String = ""
     property agent_thought : String? = nil
+    property last_agent_response : String? = nil
+    property active_subagent : SubagentTelemetry? = nil
+    property max_response_lines : Int32 = 6
     property turn_number : Int32 = 0
     getter opened_files : Array(OpenedFile) = [] of OpenedFile
     getter calibrator : Context::TokenEstimator
@@ -37,14 +61,17 @@ module Nightmare::UI
       @preview_lines : Int32 = Config::FILE_CARD_PREVIEW_LINES,
       @max_width : Int32 = Config::MAX_DASHBOARD_WIDTH,
       @enabled : Bool = true,
-      @output : IO = STDOUT
+      @output : IO = STDOUT,
+      @max_response_lines : Int32 = 6
     )
     end
 
-    def reset_for_new_turn(user_prompt : String) : Nil
+    def reset_for_new_turn(user_prompt : String, previous_response : String? = nil) : Nil
       @opened_files.clear
       @current_user_prompt = user_prompt
       @agent_thought = nil
+      @last_agent_response = previous_response
+      @active_subagent = nil
       @turn_number += 1
     end
 
@@ -181,6 +208,27 @@ module Nightmare::UI
           end
         end
         @output.flush
+      elsif name == "file_info"
+        path = args["path"]?.try(&.as_s?) || ""
+        info = JSON.parse(result_str) rescue nil
+        if info
+          size = format_bytes(info["size_bytes"]?.try(&.as_i64?) || 0_i64)
+          lines = info["lines"]?.try(&.as_i?) || 0
+          @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}(#{size} · #{lines}L)#{Theme::RESET}"
+        else
+          @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}#{result_str.strip}#{Theme::RESET}"
+        end
+        @output.flush
+      elsif name == "search"
+        pattern = args["pattern"]?.try(&.as_s?) || args["query"]?.try(&.as_s?) || ""
+        match_count = result_str.lines.size
+        @output.puts "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
+        @output.flush
+      elsif name == "list_files"
+        path = args["path"]?.try(&.as_s?) || "."
+        file_count = result_str.lines.size
+        @output.puts "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
+        @output.flush
       else
         # For non-file tools, print result or summary
         @output.puts result_str
@@ -222,6 +270,59 @@ module Nightmare::UI
       @output.puts panel.render_row(stats_content, Theme.border)
       @output.puts panel.render_footer(Theme.border)
       @output.puts
+
+      # 1.5. Last Agent Response (First-Class Information Card)
+      if resp = @last_agent_response
+        raw_lines = resp.strip.lines
+        unless raw_lines.empty?
+          resp_title = "#{Theme.title}✦ AGENT RESPONSE#{Theme::RESET}"
+          max_resp_lines = term_h <= 30 ? 3 : @max_response_lines
+          if raw_lines.size <= max_resp_lines
+            resp_badge = "#{Theme.meta_dim}#{raw_lines.size} lines#{Theme::RESET}"
+            @output.puts panel.render_header(resp_title, resp_badge, Theme.border)
+            raw_lines.each do |line|
+              panel.render_wrapped_row("  #{Theme.code_text}#{line}#{Theme::RESET}", Theme.border, max_lines: 2).each do |w|
+                @output.puts w
+              end
+            end
+            @output.puts panel.render_footer(Theme.border)
+            @output.puts
+          else
+            hidden_count = raw_lines.size - max_resp_lines
+            resp_badge = "#{Theme.meta_dim}latest #{max_resp_lines} of #{raw_lines.size}L#{Theme::RESET}"
+            @output.puts panel.render_header(resp_title, resp_badge, Theme.border)
+            @output.puts panel.render_row("  #{Theme.notice_dim}... [+#{hidden_count} earlier lines hidden; latest #{max_resp_lines} lines shown] ...#{Theme::RESET}", Theme.border)
+            raw_lines.last(max_resp_lines).each do |line|
+              panel.render_wrapped_row("  #{Theme.code_text}#{line}#{Theme::RESET}", Theme.border, max_lines: 2).each do |w|
+                @output.puts w
+              end
+            end
+            @output.puts panel.render_footer(Theme.border)
+            @output.puts
+          end
+        end
+      end
+
+      # 1.6. Active Subagent Engaged Card (Live Subagent Telemetry)
+      if subagent = @active_subagent
+        sub_title = "#{Theme.title_active}🤖 SUBAGENT ENGAGED#{Theme::RESET}"
+        sub_badge = "#{Theme.token_badge}ITER #{subagent.iteration}/#{subagent.max_iterations} ∷ #{subagent.tool_calls_count} TOOLS#{Theme::RESET}"
+        @output.puts panel.render_header(sub_title, sub_badge, Theme.border_active)
+        panel.render_wrapped_row("Task   : #{Theme.code_text}#{subagent.task}#{Theme::RESET}", Theme.border_active, max_lines: 2).each do |w|
+          @output.puts w
+        end
+        if action = subagent.active_tool
+          @output.puts panel.render_row("Action : #{Theme.highlight}#{action}#{Theme::RESET}", Theme.border_active)
+        end
+        if th = subagent.last_thought
+          @output.puts panel.render_row("Thought: #{Theme.thought}💭 #{th.lines.first}#{Theme::RESET}", Theme.border_active)
+        end
+        unless subagent.files_touched.empty?
+          @output.puts panel.render_row("Touched: #{Theme.filename}#{subagent.files_touched.uniq.join(", ")}#{Theme::RESET}", Theme.border_active)
+        end
+        @output.puts panel.render_footer(Theme.border_active)
+        @output.puts
+      end
 
       # 2. Grouped Opened Files Deck
       deck_title = "#{Theme.title}📚 Opened Files#{Theme::RESET} #{Theme.meta_dim}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}#{Theme.meta_dim})#{Theme::RESET}"

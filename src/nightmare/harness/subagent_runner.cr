@@ -22,13 +22,15 @@ module Nightmare::Harness
     getter pacer : Nightmare::Plan::Pacer?
     getter diff_approval : Proc(String, String, Bool)?
     getter shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))?
+    property turn_presenter : Nightmare::UI::TurnPresenter?
 
     def initialize(
       @client : Mantle::Clients::Client,
       @environment : Nightmare::Workspace::Environment,
       @pacer : Nightmare::Plan::Pacer? = nil,
       @diff_approval : Proc(String, String, Bool)? = nil,
-      @shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))? = nil
+      @shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))? = nil,
+      @turn_presenter : Nightmare::UI::TurnPresenter? = nil
     )
     end
 
@@ -180,11 +182,52 @@ module Nightmare::Harness
         Mantle::Message.new("user", user_prompt),
       ]
 
+      max_iterations = budget_iterations || @environment.settings.max_iterations
+      telemetry = Nightmare::UI::SubagentTelemetry.new(
+        task: task,
+        max_iterations: max_iterations
+      )
+      tp = @turn_presenter
+      if tp
+        tp.active_subagent = telemetry
+        tp.render_dashboard(action_label: "Subagent spawned")
+      end
+
+      wrapped_subagent_tools = if tp
+        subagent_tools.map do |tool|
+          orig_handler = tool.handler
+          wrapped = tool.dup
+          wrapped.handler = ->(args : Hash(String, JSON::Any)) {
+            tool_name = tool.function.name
+            args_summary = args.map { |k, v| "#{k}: #{v}" }.join(", ")
+            telemetry.active_tool = "#{tool_name}(#{args_summary})"
+            telemetry.tool_calls_count += 1
+            telemetry.files_touched = files_touched.dup
+
+            res = orig_handler ? orig_handler.call(args) : ""
+            tp.present_tool_result(tool_name, args, res)
+            res
+          }
+          wrapped
+        end
+      else
+        subagent_tools
+      end
+
       tool_calls_count = 0
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
         if last_res
           if calls = last_res.tool_calls
             tool_calls_count += calls.size
+            telemetry.tool_calls_count = tool_calls_count
+          end
+          if th = last_res.thinking
+            telemetry.last_thought = th
+          end
+          telemetry.iteration += 1
+          telemetry.files_touched = files_touched.dup
+          if tp
+            tp.render_dashboard(action_label: "Subagent step #{telemetry.iteration}")
           end
           if p = @pacer
             p.pace_turn
@@ -193,10 +236,9 @@ module Nightmare::Harness
         working_msgs
       }
 
-      max_iterations = budget_iterations || @environment.settings.max_iterations
       step = Mantle::Step.new(
         client: @client,
-        tools: subagent_tools,
+        tools: wrapped_subagent_tools,
         max_iterations: max_iterations,
         on_iteration: on_iteration
       )
@@ -219,6 +261,10 @@ module Nightmare::Harness
         end
       rescue ex
         "[Subagent exception: #{ex.message}]"
+      ensure
+        if tp
+          tp.active_subagent = nil
+        end
       end
     end
 

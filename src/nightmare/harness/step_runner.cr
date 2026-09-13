@@ -90,11 +90,27 @@ module Nightmare::Harness
       loop do
         messages = @tool_loop.store.assemble_messages(system_prompt, pinned_block)
 
+        on_iter = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
+          if last_res
+            if txt = last_res.content
+              if presenter = @turn_presenter
+                presenter.last_agent_response = txt unless txt.empty?
+              end
+            end
+            if th = last_res.thinking
+              if presenter = @turn_presenter
+                presenter.agent_thought = th unless th.empty?
+              end
+            end
+          end
+          @tool_loop.on_iteration_hook.call(working_msgs, last_res)
+        }
+
         step = Mantle::Step.new(
           client: @client,
           tools: wrapped_tools,
           max_iterations: @max_iterations,
-          on_iteration: @tool_loop.on_iteration_hook
+          on_iteration: on_iter
         )
 
         begin

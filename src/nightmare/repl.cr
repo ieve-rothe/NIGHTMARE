@@ -159,6 +159,7 @@ module Nightmare
         max_width: @env.settings.max_dashboard_width
       )
       @step_runner.turn_presenter = @turn_presenter
+      subagent_runner.turn_presenter = @turn_presenter
       @stream_ctrl = UI::StreamController.new
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       on_model = ->(new_model : String) {
@@ -232,7 +233,8 @@ module Nightmare
       @registry.set_active_side_effects(side_effects)
 
       # Start turn in context store
-      @turn_presenter.reset_for_new_turn(active_input)
+      prev_resp = @store.history.last?.try(&.last_assistant_text)
+      @turn_presenter.reset_for_new_turn(active_input, prev_resp)
       user_msg = Mantle::Message.new("user", active_input)
       @store.start_turn(user_msg)
 

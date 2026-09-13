@@ -90,6 +90,17 @@ module Nightmare::Context
       end
     end
 
+    # Returns the content of the most recent assistant message in this turn, if any.
+    def last_assistant_text : String?
+      @messages.reverse_each do |m|
+        if m.role == "assistant" && (text = m.content)
+          stripped = text.strip
+          return stripped unless stripped.empty?
+        end
+      end
+      nil
+    end
+
     # Invariant, asserted after every mutation and every prune:
     # every tool_call id in an assistant message has exactly one following
     # tool message with the matching tool_call_id, and every tool message's
