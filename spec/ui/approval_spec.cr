@@ -72,8 +72,11 @@ describe Nightmare::UI::Approval do
       edit.should be_nil
 
       out_str = output.to_s
-      out_str.should contain("Command: git status")
-      out_str.should contain("Cwd:     /tmp/workspace")
+      out_str.should contain("Command:")
+      out_str.should contain("git")
+      out_str.should contain("status")
+      out_str.should contain("Cwd:")
+      out_str.should contain("/tmp/workspace")
       out_str.should contain("Timeout: 30s")
     end
 

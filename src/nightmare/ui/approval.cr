@@ -64,7 +64,69 @@ module Nightmare::UI
       end
     end
 
-    # Renders shell execution approval modal with command, cwd, and timeout details
+    # Splits a compound shell command string on bash separators (&&, ||, ;, newlines)
+    # into individual sub-commands, preserving the separator tokens for display.
+    # Returns an array of {separator, command} tuples. The first entry has an empty separator.
+    private def split_shell_commands(command : String) : Array(Tuple(String, String))
+      parts = [] of Tuple(String, String)
+      # Split on &&, ||, ;, or literal \n while preserving delimiters
+      segments = command.split(/(\s*(?:&&|\|\||;)\s*|\n)/)
+      current_sep = ""
+      segments.each do |seg|
+        stripped = seg.strip
+        if stripped == "&&" || stripped == "||" || stripped == ";"
+          current_sep = stripped
+        elsif seg == "\n"
+          current_sep = "↵"
+        elsif !stripped.empty?
+          parts << {current_sep, stripped}
+          current_sep = ""
+        end
+      end
+      parts = [{"", command.strip}] if parts.empty?
+      parts
+    end
+
+    # Applies bash-aware syntax coloring to a single command string.
+    # Colors: executable in highlight/bold, flags in cyan, strings in green,
+    # env vars in violet, redirects in yellow, rest in code_text.
+    private def colorize_command(cmd : String) : String
+      theme = Salamander::UI::Theme
+      result = IO::Memory.new
+      tokens = cmd.split(/(\s+)/)
+      is_first_word = true
+
+      tokens.each do |token|
+        if token =~ /\A\s+\z/
+          result << token
+        elsif token =~ /\A[A-Z_][A-Z0-9_]*=/ # ENV_VAR=value
+          result << "#{theme.token_badge}#{token}#{Salamander::UI::Theme::RESET}"
+        elsif is_first_word
+          # Executable / command name — bold highlight
+          result << "#{Salamander::UI::Theme::BOLD}#{theme.highlight}#{token}#{Salamander::UI::Theme::RESET}"
+          is_first_word = false
+        elsif token.starts_with?('-')
+          # Flags
+          result << "#{theme.status_tag}#{token}#{Salamander::UI::Theme::RESET}"
+        elsif token.starts_with?('"') || token.starts_with?('\'')
+          # Quoted strings
+          result << "#{theme.success_icon}#{token}#{Salamander::UI::Theme::RESET}"
+        elsif token =~ /\A[>|<&]+\z/ || token =~ /\A\d*[>|<&]+/
+          # Redirects
+          result << "#{theme.filename}#{token}#{Salamander::UI::Theme::RESET}"
+        elsif token.starts_with?('$') || token.starts_with?("${")
+          # Shell variables
+          result << "#{theme.token_badge}#{token}#{Salamander::UI::Theme::RESET}"
+        else
+          result << "#{theme.code_text}#{token}#{Salamander::UI::Theme::RESET}"
+        end
+      end
+      result.to_s
+    end
+
+    # Renders shell execution approval modal with command, cwd, and timeout details.
+    # The command is split on bash separators and each sub-command is displayed on
+    # its own line with syntax coloring for quick human parsing.
     def approve_command(
       command : String,
       argv : Array(String),
@@ -80,13 +142,31 @@ module Nightmare::UI
       header_badge = "#{Salamander::UI::Theme.token_badge}#{timeout_seconds}s timeout#{Salamander::UI::Theme::RESET}"
 
       sanitized_cmd = command.gsub('\r', "\\r").gsub('\e', "\\e")
-      sanitized_argv = argv.map { |a| a.gsub('\r', "\\r").gsub('\e', "\\e") }
 
       @output.puts
       @output.puts panel.render_header(header_title, header_badge, border, Salamander::UI::BoxStyle::Armored)
-      @output.puts panel.render_row("Command: #{sanitized_cmd}", border, Salamander::UI::BoxStyle::Armored)
-      @output.puts panel.render_row("Argv:    #{sanitized_argv.join(" ")}", border, Salamander::UI::BoxStyle::Armored)
-      @output.puts panel.render_row("Cwd:     #{@root}", border, Salamander::UI::BoxStyle::Armored)
+
+      # Split compound commands and render each on its own line with syntax coloring
+      sub_cmds = split_shell_commands(sanitized_cmd)
+      sep_color = Salamander::UI::Theme.meta_dim
+      if sub_cmds.size == 1
+        # Single command — inline label
+        colored = colorize_command(sub_cmds[0][1])
+        @output.puts panel.render_row("Command: #{colored}", border, Salamander::UI::BoxStyle::Armored)
+      else
+        # Multiple sub-commands — one per line with separator glyphs
+        @output.puts panel.render_row("Command:", border, Salamander::UI::BoxStyle::Armored)
+        sub_cmds.each_with_index do |(sep, sub_cmd), i|
+          colored = colorize_command(sub_cmd)
+          if i == 0
+            @output.puts panel.render_row("  #{colored}", border, Salamander::UI::BoxStyle::Armored)
+          else
+            @output.puts panel.render_row("  #{sep_color}#{sep}#{Salamander::UI::Theme::RESET} #{colored}", border, Salamander::UI::BoxStyle::Armored)
+          end
+        end
+      end
+
+      @output.puts panel.render_row("Cwd:     #{Salamander::UI::Theme.filename}#{@root}#{Salamander::UI::Theme::RESET}", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Timeout: #{timeout_seconds}s", border, Salamander::UI::BoxStyle::Armored)
       if has_metachar
         note = "Note: Shell metacharacters cannot be saved to allowlist (will run once)".colorize(:yellow).to_s
