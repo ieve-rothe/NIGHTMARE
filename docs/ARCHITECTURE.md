@@ -197,7 +197,7 @@ Mapping from `Mantle::StepError` (the `ask_model` and format-retry paths):
 module Nightmare::Context
   # Atomic Turn Unit: pruned together, never split.
   # `messages` is the exact ordered wire sequence for this turn:
-  #   [user] ([assistant(+tool_calls, maybe +content)] [tool]+)* [assistant]
+  #   [user] ([assistant(+tool_calls, maybe +content)] [tool]+ | [user])* [assistant]
   class Turn
     getter messages : Array(Mantle::Message)
     getter exchanges : Array(ToolExchange)   # views into @messages
@@ -228,7 +228,9 @@ module Nightmare::Context
     # every tool_call id in an assistant message has exactly one following
     # tool message with the matching tool_call_id, and every tool message's
     # tool_call_id refers to a preceding assistant tool_call in the same turn.
-    def well_formed? : Bool
+    # Mid-turn format-correction user prompts are permitted provided no tool calls
+    # are pending.
+    def well_formed?(allow_pending_tools : Bool = false) : Bool
   end
 
   class ToolExchange

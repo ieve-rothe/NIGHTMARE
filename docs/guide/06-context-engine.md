@@ -4,7 +4,7 @@ LLMs have finite context windows. NIGHTMARE manages this transparently by dynami
 
 ## Atomic Turn Units
 
-A Turn is the fundamental indivisible unit of context. It contains the initial user prompt, all intermediate tool calls and their results, and the final assistant response. Tool calls and results are strictly paired and never separated during pruning.
+A Turn is the fundamental indivisible unit of context. It contains the initial user prompt, all intermediate tool calls and their results, optional in-turn format-correction prompts (when recovering from malformed output), and the final assistant response. Tool calls and results are strictly paired and never separated during pruning.
 
 ```crystal
 # Turn message sequence guarantee
@@ -12,6 +12,8 @@ A Turn is the fundamental indivisible unit of context. It contains the initial u
   Mantle::Message.new(role: "user", content: "..."),
   Mantle::Message.new(role: "assistant", tool_calls: [...]),
   Mantle::Message.new(role: "tool", content: "..."),
+  # Optional: in-turn format-correction retry prompt if model output was malformed
+  # Mantle::Message.new(role: "user", content: "The previous response had malformed output..."),
   Mantle::Message.new(role: "assistant", content: "...")
 ]
 ```
