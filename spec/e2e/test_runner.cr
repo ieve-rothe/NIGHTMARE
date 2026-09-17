@@ -420,7 +420,7 @@ module Nightmare::E2E
         if Time.instant > deadline
           raise "Timeout waiting for #{pattern.inspect} in output. Captured stdout:\n#{current}\nCaptured stderr:\n#{stderr}"
         end
-        sleep 25.milliseconds
+        sleep 5.milliseconds
       end
     end
 
@@ -459,7 +459,7 @@ module Nightmare::E2E
         if Time.instant > deadline
           raise "Timeout waiting for #{pattern.inspect} in stderr. Captured stderr:\n#{current}"
         end
-        sleep 25.milliseconds
+        sleep 5.milliseconds
       end
     end
 
@@ -470,7 +470,7 @@ module Nightmare::E2E
           terminate!
           raise "Process did not exit within #{timeout}"
         end
-        sleep 25.milliseconds
+        sleep 5.milliseconds
       end
       @process.wait
     end
@@ -527,7 +527,7 @@ module Nightmare::E2E
     )
 
     session = ProcessSession.new(proc)
-    session.wait_for("> ", timeout: 500.milliseconds) rescue nil
+    session.wait_for(/(?:>|❯|▶)/, timeout: 500.milliseconds) rescue nil
     session
   end
 
