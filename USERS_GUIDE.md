@@ -12,10 +12,11 @@ A comprehensive operational guide to **NIGHTMARE**, a standalone developer REPL 
 4. [Configuration Hierarchy](#4-configuration-hierarchy)
 5. [Tool Suite & The Approval Boundary](#5-tool-suite--the-approval-boundary)
 6. [Context Engine & Token Management](#6-context-engine--token-management)
-7. [Slash Commands Reference](#7-slash-commands-reference)
-8. [Signal Handling & Cooperative Interruption](#8-signal-handling--cooperative-interruption)
-9. [Observability & Audit Logging](#9-observability--audit-logging)
-10. [Troubleshooting & FAQs](#10-troubleshooting--faqs)
+7. [Tool Calling, Automated Loops & Middleware Pipeline](#7-tool-calling-automated-loops--middleware-pipeline)
+8. [Slash Commands Reference](#8-slash-commands-reference)
+9. [Signal Handling & Cooperative Interruption](#9-signal-handling--cooperative-interruption)
+10. [Observability & Audit Logging](#10-observability--audit-logging)
+11. [Troubleshooting & FAQs](#11-troubleshooting--faqs)
 
 ---
 
@@ -238,7 +239,67 @@ Token counts are estimated using character-to-token divisors self-calibrated fro
 
 ---
 
-## 7. Slash Commands Reference
+## 7. Tool Calling, Automated Loops & Middleware Pipeline
+
+When a user submits a prompt in NIGHTMARE, the execution engine coordinates a multi-layered, self-healing pipeline across the presentation layer and Mantle (the LLM communication & inference execution framework). Under the hood, an agent navigating through dozens of tool calls is traversing a nested set of control loops designed to maintain context limits, enforce security invariants, detect infinite loops, and handle transient provider faults without corrupting state.
+
+### The Multi-Tier Loop & Retry Hierarchy
+
+There are 6 distinct loop and retry boundaries that govern the lifecycle of a turn:
+
+1. **Outer Turn & Context Overflow Retry Loop (`StepRunner`)**:
+   - Catches typed `APIError#context_overflow?` errors.
+   - Sheds the active turn and prunes older history messages, then retries from scratch.
+   - Non-overflow errors (e.g. `IO::Error`, malformed parameters) never trigger shedding and propagate immediately.
+2. **Step Inference & Tool Loop (`Mantle::Step#run`)**:
+   - Bounded by `max_iterations` (default: 25).
+   - Manages the conversational cycle with the model. If the model emits tool calls, they are dispatched, and output is formatted and appended before looping.
+3. **Predictive Iteration Hook (`Harness::ToolLoop`)**:
+   - Executes before each provider inference call.
+   - Synchronizes working messages into the active turn and recalibrates the token estimator using `prompt_eval_count`.
+   - Performs proactive in-turn shedding if estimated tokens exceed `hardmax * trigger_ratio`, keeping only the most recent tool calls verbatim to avoid exceeding limits mid-turn.
+4. **Provider HTTP Client & Retrier (`Mantle::Clients`)**:
+   - Streams tokens and handles HTTP status codes.
+   - For `429 Too Many Requests`, it invokes an exponential backoff retry using the `Retry-After` header or a jittered delay.
+5. **Middleware Pipeline (`ToolMiddleware Stack`)**:
+   - **Presentation**: Surfaces outputs to the UI (omitted in headless runs).
+   - **LoopDetector**: Detects repeated identical tool invocations and short-circuits with a refusal string without executing the underlying tool.
+   - **ExceptionTrapping**: Traps whitelisted operational errors (e.g., `SecurityError`, `File::Error`) and formats them as model-readable error strings for self-correction.
+6. **Tool Execution & Interactive Approval Gateway**:
+   - Process group execution supervisor for isolating and capping execution.
+   - `Tools::Guard` performs containment checks (`realpath`); `SecurityError` raised on traversal.
+   - UI approval modal (`[y/N/e/a/p]`) manages explicit confirmation, with inline edit looping back for re-approval.
+
+### Middleware Architecture & Design Philosophy
+
+**Why Middleware?**
+Prior to the middleware refactoring, tool handlers were monolithic, handling user display, loop detection, and error formatting simultaneously. The middleware pipeline creates a clean separation of concerns, enabling headless mode support (preventing stdout corruption) and establishing strict error boundaries where operational errors are handled but fatal developer bugs (e.g., `NilAssertionError`) are allowed to crash the runner securely.
+
+**The Middleware Interface**
+Middlewares wrap tool handlers using a simple interface:
+
+```crystal
+module Mantle::Tools::Middleware
+  abstract class Base
+    abstract def call(
+      tool_name : String,
+      args : Hash(String, JSON::Any),
+      next_handler : Proc(Hash(String, JSON::Any), String)
+    ) : String
+  end
+end
+```
+
+**Custom Middleware Extensions**
+Creating custom middleware is straightforward by inheriting from `ToolMiddleware::Base` and composing them sequentially.
+
+- **Audit Logging**: Logs every tool execution, timing, and arguments to a structured JSONL file.
+- **Sensitive Argument Redaction**: Redacts credentials (like passwords or API keys) from arguments before passing them down the pipeline or to logging.
+- **Dry-Run Safety Switch**: Intercepts mutating tools (`write_file`, `run_command`, etc.) and prevents execution when a dry-run flag is active.
+
+---
+
+## 8. Slash Commands Reference
 
 NIGHTMARE provides operators with immediate command controls:
 
@@ -260,7 +321,7 @@ NIGHTMARE provides operators with immediate command controls:
 
 ---
 
-## 8. Signal Handling & Cooperative Interruption
+## 9. Signal Handling & Cooperative Interruption
 
 ### During LLM Generation or Tool Execution (`Ctrl+C`)
 
@@ -285,7 +346,7 @@ If files were written or commands were executed before the interruption occurred
 
 ---
 
-## 9. Observability & Audit Logging
+## 10. Observability & Audit Logging
 
 ### Audit Log (`llm_calls.jsonl`)
 
@@ -338,7 +399,7 @@ You can turn off logging permanently across all sessions by setting `"logging": 
 
 ---
 
-## 10. Troubleshooting & FAQs
+## 11. Troubleshooting & FAQs
 
 ### Q: `[Error: Mantle step error: ClientFailure - Error 404: {"error":"model '...' not found"}]`
 **Cause**: The requested model is not downloaded in Ollama.  
