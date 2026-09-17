@@ -129,7 +129,7 @@ module Nightmare::Tools
         Config::DEFAULT_COMMAND_TIMEOUT
       end
 
-      # Environment per ARCHITECTURE_R3 §4.3 & Security Hardening (VULN-01)
+      # Environment per ARCHITECTURE §4.3 & Security Hardening (VULN-01)
       # clear_env: true prevents parent process API keys and secrets from leaking into child processes.
       env = {
         "PATH"                => ENV["PATH"]? || "/usr/local/bin:/usr/bin:/bin",

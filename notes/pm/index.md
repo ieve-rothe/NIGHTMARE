@@ -16,3 +16,5 @@ This file tracks the status and priority of all development tickets for the `nig
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | [TKT-001](notes/pm/closed/TKT-001-rename-directives-to-system-prompt.md) | Rename Directives Terminology to System Prompt Across Codebase | Architecture & Terminology | Closed | Med | 2026-09-11 |
 | [TKT-003](notes/pm/closed/TKT-003-colorize-diff-presentation.md) | Colorize Diff Presentation for File Changes | User Interface & Tooling | Closed | Med | 2026-09-11 |
+| [TKT-006](notes/pm/closed/TKT-006-fix-well-formed-turn-invariant-format-retry.md) | Fix Well-Formed Turn Invariant Assertion During Format-Correction Retries | Context & Harness Invariant Integrity | Closed | High | 2026-09-17 |
+| [TKT-007](notes/pm/closed/TKT-007-cleanup-deprecated-documentation.md) | Deprecate and Consolidate Documentation in docs/ | Documentation & Architecture | Closed | Med | 2026-09-17 |

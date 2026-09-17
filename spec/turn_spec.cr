@@ -64,6 +64,34 @@ describe Nightmare::Context::Turn do
       turn.complete?.should be_true
       turn.well_formed?.should be_true
     end
+
+    it "considers turn with in-turn format correction user message well formed when calls paired" do
+      turn = Nightmare::Context::Turn.new(Mantle::Message.new("user", "Initial prompt"))
+      c1 = Mantle::Clients::ToolCall.new(id: "c1", function: Mantle::Clients::ToolCallFunction.new(name: "f1", arguments: "{}"))
+      turn.append_assistant(Mantle::Message.new("assistant", "Tool 1", tool_calls: [c1]))
+      turn.append_tool_result(c1, "res1", 4)
+      # Format retry injected by StepRunner
+      turn.messages << Mantle::Message.new("user", "The previous response had malformed output or arguments. Please reformat and proceed.")
+      c2 = Mantle::Clients::ToolCall.new(id: "c2", function: Mantle::Clients::ToolCallFunction.new(name: "f2", arguments: "{}"))
+      turn.append_assistant(Mantle::Message.new("assistant", "Tool 2", tool_calls: [c2]))
+      turn.append_tool_result(c2, "res2", 4)
+      turn.append_assistant(Mantle::Message.new("assistant", "All done"))
+
+      turn.complete?.should be_true
+      turn.well_formed?.should be_true
+    end
+
+    it "rejects turn if user message occurs while a tool call is still pending" do
+      turn = Nightmare::Context::Turn.new(Mantle::Message.new("user", "Initial prompt"))
+      c1 = Mantle::Clients::ToolCall.new(id: "c1", function: Mantle::Clients::ToolCallFunction.new(name: "f1", arguments: "{}"))
+      turn.append_assistant(Mantle::Message.new("assistant", "Tool 1", tool_calls: [c1]))
+      # User message inserted before tool result for c1
+      turn.messages << Mantle::Message.new("user", "Interrupted prematurely")
+      turn.append_tool_result(c1, "res1", 4)
+      turn.append_assistant(Mantle::Message.new("assistant", "Done"))
+
+      turn.well_formed?.should be_false
+    end
   end
 
   describe "struct write-back invariant (T3)" do

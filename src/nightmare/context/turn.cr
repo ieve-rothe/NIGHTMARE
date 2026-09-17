@@ -131,6 +131,8 @@ module Nightmare::Context
           return false unless open_calls.includes?(id)
           calls_declared[id] += 1
           open_calls.delete(id)
+        when "user"
+          return false unless open_calls.empty?
         else
           return false
         end

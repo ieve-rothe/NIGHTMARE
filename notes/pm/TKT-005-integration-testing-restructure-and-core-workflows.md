@@ -22,7 +22,7 @@ I need the legacy E2E tests quarantined so they do not slow down or pollute dail
 An exhaustive audit of `/home/cam/repos/adjutant/nightmare/spec` revealed a stark dichotomy between the unit suite (Trust Score: **8.5/10**) and the E2E suite (Trust Score: **2.0/10**):
 
 1. **Unit & In-Process Tests (`spec/*_spec.cr`)**:
-   - Genuinely test the 19 core architectural invariants (`T1` through `T19` from `docs/ARCHITECTURE_R3.md §9`).
+   - Genuinely test the 19 core architectural invariants (`T1` through `T19` from `docs/ARCHITECTURE.md §9`).
    - `spec/guard_spec.cr`: Hard adversarial path traversal fuzzing (`../`, `/etc/passwd`, sibling directory `root-evil`, out-of-tree symlinks, protected `.git` and `.nightmare` paths).
    - `spec/shedder_and_store_spec.cr`: Rigorously verifies struct write-back mechanics (`T3`), in-turn shedding preserving the last 2 tool outputs verbatim (`T4`), and byte-identical history immutability (`T2`).
    - `spec/harness_spec.cr`: Accurately tests loop detection (`T16`), cancellation rollback (`T12`), and 429 rate limit backoff.

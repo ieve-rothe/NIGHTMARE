@@ -53,7 +53,7 @@ As an operator running local and mixed-tier LLMs, I need the system to execute m
    - Decoupled thermal polling: query GPU hardware sensors (`nvidia-smi` / `sysfs`) strictly at item boundaries or throttled to once every 20 seconds (avoiding expensive process forks on every 0.5s turn). Pause execution if GPU $> 80^\circ\text{C}$ until $< 70^\circ\text{C}$.
    - Global run budget (`max_run_duration_seconds: 14400`, `max_total_tokens: 500000`). Park in-flight items and generate `/plan report` on trip.
 
-See full technical specification in [`docs/PROPOSAL_SUBAGENTS_AND_DETERMINISTIC_ORCHESTRATION.md`](../../docs/PROPOSAL_SUBAGENTS_AND_DETERMINISTIC_ORCHESTRATION.md).
+See full documentation in [`docs/guide/08-plan-orchestrator.md`](../docs/guide/08-plan-orchestrator.md).
 
 ## 3. Verification & Validation (V&V)
 * **Verification Plan:**

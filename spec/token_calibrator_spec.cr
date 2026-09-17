@@ -2,7 +2,7 @@
 require "./spec_helper"
 
 describe Nightmare::Context::TokenEstimator do
-  it "initializes with INITIAL_DIVISOR (3.5) per ARCHITECTURE_R3 §7" do
+  it "initializes with INITIAL_DIVISOR (3.5) per ARCHITECTURE §7" do
     calibrator = Nightmare::Context::TokenEstimator.new
     calibrator.divisor.should eq(3.5)
   end

@@ -132,6 +132,39 @@ describe "Nightmare Harness & Step Runner" do
       # History must NOT be shed
       store.active_turn.should_not be_nil
     end
+
+    it "recovers from MalformedOutput via format correction retry and successfully commits turn" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      resp1 = Mantle::Clients::Response.new(content: nil, tool_calls: nil, thinking: "Thinking only...")
+      resp2 = Mantle::Clients::Response.new(content: "Success after format retry", tool_calls: nil)
+
+      client = FakeClient.new([resp1, resp2])
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [] of Mantle::Tools::Tool,
+        tool_loop: tool_loop,
+        format_retries: 1
+      )
+
+      store.start_turn("Format retry prompt")
+      outcome = runner.run_turn(store)
+
+      outcome.ok?.should be_true
+      outcome.value.should eq("Success after format retry")
+      client.call_count.should eq(2)
+
+      # Turn committed cleanly in store history
+      store.active_turn.should be_nil
+      store.history.size.should eq(1)
+      committed_turn = store.history.first
+      committed_turn.messages.any? { |m| m.content.try(&.includes?("malformed output or arguments")) }.should be_true
+      committed_turn.well_formed?.should be_true
+      store.well_formed?.should be_true
+    end
   end
 
   describe "configurable max_iterations" do

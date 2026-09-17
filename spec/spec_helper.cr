@@ -39,7 +39,7 @@ def with_env(vars : Hash(String, String?), &)
   end
 end
 
-# In-process fake client for deterministic testing of inference and step loops (ARCHITECTURE_R3 §9)
+# In-process fake client for deterministic testing of inference and step loops (ARCHITECTURE §9)
 class FakeClient < Mantle::Clients::Client
   property model_name : String = "fake"
   property responses : Array(Mantle::Clients::Response)

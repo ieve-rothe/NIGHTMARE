@@ -12,7 +12,7 @@ module Nightmare::Tools
     getter env : Workspace::Environment
     property files_targeted : Array(String)? = nil
 
-    # Sensitive read glob patterns per ARCHITECTURE_R3 §4.1
+    # Sensitive read glob patterns per ARCHITECTURE §4.1
     SENSITIVE_READ_PATTERNS = [
       ".env*",
       "*.pem",
