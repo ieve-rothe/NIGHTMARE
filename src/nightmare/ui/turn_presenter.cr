@@ -156,6 +156,11 @@ module Nightmare::UI
           @output.puts "  #{Theme.status_tag}📌#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
           @output.flush
           return
+        elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("READ", "FAILED", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          @output.flush
+          return
         end
 
         opened = record_file_open(path, result_str, offset, limit)
@@ -210,24 +215,39 @@ module Nightmare::UI
         @output.flush
       elsif name == "file_info"
         path = args["path"]?.try(&.as_s?) || ""
-        info = JSON.parse(result_str) rescue nil
-        if info
-          size = format_bytes(info["size_bytes"]?.try(&.as_i64?) || 0_i64)
-          lines = info["lines"]?.try(&.as_i?) || 0
-          @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}(#{size} · #{lines}L)#{Theme::RESET}"
+        if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("INFO", "FAILED", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
-          @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}#{result_str.strip}#{Theme::RESET}"
+          info = JSON.parse(result_str) rescue nil
+          if info
+            size = format_bytes(info["size_bytes"]?.try(&.as_i64?) || 0_i64)
+            lines = info["lines"]?.try(&.as_i?) || 0
+            @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}(#{size} · #{lines}L)#{Theme::RESET}"
+          else
+            @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}#{result_str.strip}#{Theme::RESET}"
+          end
         end
         @output.flush
       elsif name == "search"
         pattern = args["pattern"]?.try(&.as_s?) || args["query"]?.try(&.as_s?) || ""
-        match_count = result_str.lines.size
-        @output.puts "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
+        if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("SEARCH", "FAILED", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        else
+          match_count = result_str.lines.size
+          @output.puts "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
+        end
         @output.flush
       elsif name == "list_files"
-        path = args["path"]?.try(&.as_s?) || "."
-        file_count = result_str.lines.size
-        @output.puts "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
+        path = args["path"]?.try(&.as_s?) || args["directory"]?.try(&.as_s?) || "."
+        if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
+          tag = Theme.bracket_tag("LIST", "FAILED", Theme.border_danger)
+          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+        else
+          file_count = result_str.lines.size
+          @output.puts "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
+        end
         @output.flush
       else
         # For non-file tools, print result or summary

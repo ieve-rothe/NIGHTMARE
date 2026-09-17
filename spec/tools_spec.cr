@@ -469,6 +469,50 @@ PY
         result.should eq("[Execution rejected by user]")
       end
     end
+
+    it "executes shell pipelines cleanly under bash -c when approved" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        handler = ->(_cmd : String, _argv : Array(String), has_meta : Bool, _timeout : Int32) {
+          has_meta.should be_true
+          {Nightmare::Tools::ApprovalOutcome::Yes, nil.as(String?)}
+        }
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist, approval_handler: handler)
+        result = shell.run_command("echo 'hello pipeline' | tr 'a-z' 'A-Z'")
+        result.should contain("HELLO PIPELINE")
+      end
+    end
+
+    it "refuses to save metacharacter commands to allowlist on [a] or [p] approval" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        handler_calls = 0
+        handler = ->(_cmd : String, _argv : Array(String), _has_meta : Bool, _timeout : Int32) {
+          handler_calls += 1
+          {Nightmare::Tools::ApprovalOutcome::AllSession, nil.as(String?)}
+        }
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist, approval_handler: handler)
+        cmd = "echo foo | grep foo"
+        shell.run_command(cmd)
+
+        handler_calls.should eq(1)
+        # Should not be in allowlist
+        allowlist.session_exact.should be_empty
+        allowlist.auto_approvable?(cmd, Nightmare::Tools::Allowlist.tokenize(cmd)).should be_false
+
+        # Second invocation still forces approval handler
+        shell.run_command(cmd)
+        handler_calls.should eq(2)
+      end
+    end
   end
 end
 

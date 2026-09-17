@@ -1,5 +1,6 @@
 # spec/harness_spec.cr
 require "./spec_helper"
+require "../src/nightmare/tools/middleware"
 
 describe "Nightmare Harness & Step Runner" do
   describe "loop detection (T16)" do
@@ -44,7 +45,7 @@ describe "Nightmare Harness & Step Runner" do
       # Trigger cancellation flag
       tool_loop.cancelled = true
 
-      outcome = runner.run_turn
+      outcome = runner.run_turn(store)
 
       outcome.ok?.should be_false
       outcome.cancelled?.should be_true
@@ -93,7 +94,7 @@ describe "Nightmare Harness & Step Runner" do
       )
 
       store.start_turn("Overflow prompt")
-      outcome = runner.run_turn
+      outcome = runner.run_turn(store)
 
       outcome.ok?.should be_true
       outcome.value.should eq("Success after emergency shed")
@@ -104,6 +105,32 @@ describe "Nightmare Harness & Step Runner" do
       first_req_chars = client.recorded_messages[0].sum { |m| (m.content || "").size }
       second_req_chars = client.recorded_messages[1].sum { |m| (m.content || "").size }
       second_req_chars.should be < first_req_chars
+    end
+
+    it "does not trigger context overflow on network/socket IO errors" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      # Network error with "length" in the message
+      client = FakeClient.new
+      client.raise_on_call[1] = IO::Error.new("Connection reset by peer (length mismatch)")
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [] of Mantle::Tools::Tool,
+        tool_loop: tool_loop
+      )
+
+      store.start_turn("Network test prompt")
+      outcome = runner.run_turn(store)
+
+      outcome.ok?.should be_false
+      outcome.error.not_nil!.kind.should eq(Nightmare::Harness::StepErrorKind::ClientFailure)
+      outcome.error.not_nil!.message.should contain("Connection reset by peer")
+      client.call_count.should eq(1)
+      # History must NOT be shed
+      store.active_turn.should_not be_nil
     end
   end
 
@@ -136,11 +163,109 @@ describe "Nightmare Harness & Step Runner" do
       )
 
       store.start_turn("Test max iterations")
-      outcome = runner.run_turn
+      outcome = runner.run_turn(store)
 
       outcome.ok?.should be_false
       outcome.error.not_nil!.kind.should eq(Nightmare::Harness::StepErrorKind::MaxIterationsReached)
       client.call_count.should eq(2)
+    end
+  end
+
+  describe "explicit SlidingStore isolation (subagent depth-1)" do
+    it "uses the provided store and does not pollute another store" do
+      orchestrator_store = Nightmare::Context::SlidingStore.new
+      subagent_store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(orchestrator_store, calibrator)
+
+      orchestrator_store.start_turn("Orchestrator prompt")
+
+      subagent_client = FakeClient.new([
+        Mantle::Clients::Response.new(content: "Subagent answer", tool_calls: nil)
+      ])
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: subagent_client,
+        tools: [] of Mantle::Tools::Tool,
+        tool_loop: tool_loop
+      )
+
+      subagent_store.start_turn("Subagent subtask")
+      outcome = runner.run_turn(subagent_store)
+
+      outcome.ok?.should be_true
+      outcome.value.should eq("Subagent answer")
+
+      # Subagent turn committed in subagent store
+      subagent_store.history.size.should eq(1)
+      subagent_store.history.first.user_message.content.should eq("Subagent subtask")
+
+      # Orchestrator turn remained untouched and uncommitted
+      orchestrator_store.history.size.should eq(0)
+      orchestrator_store.active_turn.should_not be_nil
+      orchestrator_store.active_turn.not_nil!.user_message.content.should eq("Orchestrator prompt")
+    end
+  end
+
+  describe "strict error boundary" do
+    it "traps operational errors and returns them as tool result strings" do
+      schema = Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+
+      # 1. SecurityError
+      func1 = Mantle::Tools::FunctionDefinition.new("sec_tool", "desc", schema)
+      t1 = Mantle::Tools::Tool.new(func1) { |_| raise SecurityError.new("outside root") }
+
+      # 2. File::NotFoundError
+      func2 = Mantle::Tools::FunctionDefinition.new("file_tool", "desc", schema)
+      t2 = Mantle::Tools::Tool.new(func2) { |_| raise File::NotFoundError.new("File not found", file: "missing.txt") }
+
+      # 3. ArgumentError
+      func3 = Mantle::Tools::FunctionDefinition.new("arg_tool", "desc", schema)
+      t3 = Mantle::Tools::Tool.new(func3) { |_| raise ArgumentError.new("invalid param") }
+
+      # 4. JSON::ParseException
+      func4 = Mantle::Tools::FunctionDefinition.new("json_tool", "desc", schema)
+      t4 = Mantle::Tools::Tool.new(func4) { |_| raise JSON::ParseException.new("bad json", 1, 1) }
+
+      # 5. CommandFailedError
+      func5 = Mantle::Tools::FunctionDefinition.new("cmd_tool", "desc", schema)
+      t5 = Mantle::Tools::Tool.new(func5) { |_| raise Nightmare::Tools::CommandFailedError.new(1, "exit status 1") }
+
+      tools = [t1, t2, t3, t4, t5]
+      hardened = ToolMiddleware.wrap_all(tools, [ToolMiddleware::ExceptionTrapping.new] of ToolMiddleware::Base)
+
+      hardened[0].execute({} of String => JSON::Any).should eq("[SecurityError: outside root]")
+      hardened[1].execute({} of String => JSON::Any).should eq("[FileError: File not found]")
+      hardened[2].execute({} of String => JSON::Any).should eq("[ArgumentError: invalid param]")
+      hardened[3].execute({} of String => JSON::Any).should contain("[JSONError: bad json")
+      hardened[4].execute({} of String => JSON::Any).should eq("[CommandFailed: exit status 1]")
+    end
+
+    it "lets developer bugs (NilAssertionError, IndexError, TypeCastError) crash without being trapped" do
+      schema = Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+
+      func1 = Mantle::Tools::FunctionDefinition.new("nil_tool", "desc", schema)
+      t1 = Mantle::Tools::Tool.new(func1) { |_| raise NilAssertionError.new("nil bug") }
+
+      func2 = Mantle::Tools::FunctionDefinition.new("idx_tool", "desc", schema)
+      t2 = Mantle::Tools::Tool.new(func2) { |_| raise IndexError.new("index bug") }
+
+      func3 = Mantle::Tools::FunctionDefinition.new("type_tool", "desc", schema)
+      t3 = Mantle::Tools::Tool.new(func3) { |_| raise TypeCastError.new("cast bug") }
+
+      hardened = ToolMiddleware.wrap_all([t1, t2, t3], [ToolMiddleware::ExceptionTrapping.new] of ToolMiddleware::Base)
+
+      expect_raises(NilAssertionError, "nil bug") do
+        hardened[0].execute({} of String => JSON::Any)
+      end
+
+      expect_raises(IndexError, "index bug") do
+        hardened[1].execute({} of String => JSON::Any)
+      end
+
+      expect_raises(TypeCastError, "cast bug") do
+        hardened[2].execute({} of String => JSON::Any)
+      end
     end
   end
 end

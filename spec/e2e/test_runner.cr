@@ -10,7 +10,7 @@ module Nightmare::E2E
   SRC_PATH = File.expand_path("../../src/nightmare.cr", __DIR__)
 
   def self.binary_exists? : Bool
-    File.exists?(BIN_PATH)
+    File.exists?(BIN_PATH) && File.info(BIN_PATH).modification_time >= File.info(SRC_PATH).modification_time
   end
 
   def self.compile_binary! : Bool
@@ -375,13 +375,48 @@ module Nightmare::E2E
       @process.input.close rescue nil
     end
 
-    def wait_for(pattern : Regex | String, timeout : Time::Span = 2.seconds) : String
+    @out_cursor : Int32 = 0
+    @err_cursor : Int32 = 0
+
+    def reset_cursor! : Nil
+      @mutex.synchronize do
+        @out_cursor = 0
+        @err_cursor = 0
+      end
+    end
+
+    def wait_for(pattern : Regex | String, timeout : Time::Span = 2.seconds, from_start : Bool = false) : String
       deadline = Time.instant + timeout
       loop do
         current = stdout
-        if pattern.is_a?(Regex) ? current =~ pattern : current.includes?(pattern)
-          return current
+        matched = false
+        match_len = 0
+        match_idx = 0
+
+        @mutex.synchronize do
+          search_start = from_start ? 0 : @out_cursor
+          slice = search_start < current.size ? current[search_start..] : ""
+
+          if pattern.is_a?(Regex)
+            if m = pattern.match(slice)
+              matched = true
+              match_idx = search_start + m.begin(0)
+              match_len = m[0].size
+            end
+          else
+            if idx = slice.index(pattern)
+              matched = true
+              match_idx = search_start + idx
+              match_len = pattern.size
+            end
+          end
+
+          if matched
+            @out_cursor = match_idx + match_len
+            return current
+          end
         end
+
         if Time.instant > deadline
           raise "Timeout waiting for #{pattern.inspect} in output. Captured stdout:\n#{current}\nCaptured stderr:\n#{stderr}"
         end
@@ -389,13 +424,38 @@ module Nightmare::E2E
       end
     end
 
-    def wait_for_error(pattern : Regex | String, timeout : Time::Span = 2.seconds) : String
+    def wait_for_error(pattern : Regex | String, timeout : Time::Span = 2.seconds, from_start : Bool = false) : String
       deadline = Time.instant + timeout
       loop do
         current = stderr
-        if pattern.is_a?(Regex) ? current =~ pattern : current.includes?(pattern)
-          return current
+        matched = false
+        match_len = 0
+        match_idx = 0
+
+        @mutex.synchronize do
+          search_start = from_start ? 0 : @err_cursor
+          slice = search_start < current.size ? current[search_start..] : ""
+
+          if pattern.is_a?(Regex)
+            if m = pattern.match(slice)
+              matched = true
+              match_idx = search_start + m.begin(0)
+              match_len = m[0].size
+            end
+          else
+            if idx = slice.index(pattern)
+              matched = true
+              match_idx = search_start + idx
+              match_len = pattern.size
+            end
+          end
+
+          if matched
+            @err_cursor = match_idx + match_len
+            return current
+          end
         end
+
         if Time.instant > deadline
           raise "Timeout waiting for #{pattern.inspect} in stderr. Captured stderr:\n#{current}"
         end

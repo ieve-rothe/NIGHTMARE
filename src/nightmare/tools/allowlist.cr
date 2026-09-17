@@ -65,13 +65,13 @@ module Nightmare::Tools
         elsif ch == '"' && !in_single_quote
           in_double_quote = !in_double_quote
           has_token = true
-        elsif (ch == ' ' || ch == '\t') && !in_single_quote && !in_double_quote
+        elsif (ch == ' ' || ch == '\t' || ch == '\n') && !in_single_quote && !in_double_quote
           if has_token
             tokens << current.to_s
             current = String::Builder.new
             has_token = false
           end
-        elsif (ch == '\r' || ch == '\n' || ch.whitespace? || ch.control?) && !in_single_quote && !in_double_quote
+        elsif (ch == '\r' || ch.whitespace? || ch.control?) && !in_single_quote && !in_double_quote
           raise ArgumentError.new("Invalid command syntax: control or non-standard whitespace character")
         else
           current << ch
@@ -183,19 +183,20 @@ module Nightmare::Tools
 
     # Records an exact command approval for the active session
     def allow_session_exact(argv : Array(String)) : Nil
+      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
       @session_exact.add(argv.join(" "))
     end
 
     # Persists an exact command to $XDG_CONFIG_HOME/.../allow
     def allow_persist_exact(argv : Array(String)) : Nil
-      return if argv.empty?
+      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
       @persistent_exact.add(argv.join(" "))
       save_persistent
     end
 
     # Records a prefix approval (argv[0] + argv[1]) for the active session
     def allow_session_prefix(argv : Array(String)) : Nil
-      return if argv.empty?
+      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
       binary = File.basename(argv[0])
 
       if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
@@ -209,7 +210,7 @@ module Nightmare::Tools
 
     # Persists a prefix or exact command to $XDG_CONFIG_HOME/.../allow
     def allow_persist_prefix(argv : Array(String)) : Nil
-      return if argv.empty?
+      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
       binary = File.basename(argv[0])
 
       if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')

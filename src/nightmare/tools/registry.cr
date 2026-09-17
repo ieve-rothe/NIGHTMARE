@@ -8,6 +8,7 @@ require "./allowlist"
 require "./read_only"
 require "./mutation"
 require "./shell"
+require "./middleware"
 require "../harness/subagent_runner"
 
 module Nightmare::Tools
@@ -18,6 +19,7 @@ module Nightmare::Tools
     getter mutation : Mutation
     getter shell : Shell
     property subagent_runner : Harness::SubagentRunner?
+    property middlewares : Array(ToolMiddleware::Base) = [] of ToolMiddleware::Base
 
     def initialize(
       @guard : Guard,
@@ -50,7 +52,7 @@ module Nightmare::Tools
 
     # Builds the array of Mantle::Tools::Tool definitions with schema and execution handlers
     def build_tools : Array(Mantle::Tools::Tool)
-      [
+      tools = [
         build_list_files_tool,
         build_search_tool,
         build_read_file_tool,
@@ -61,11 +63,12 @@ module Nightmare::Tools
         build_run_command_tool,
         build_spawn_subagent_tool,
       ]
+      ToolMiddleware.wrap_all(tools, @middlewares)
     end
 
     # Builds toolset for subagents: omits recursive delegation tools
     def build_subagent_tools : Array(Mantle::Tools::Tool)
-      [
+      tools = [
         build_list_files_tool,
         build_search_tool,
         build_read_file_tool,
@@ -75,6 +78,7 @@ module Nightmare::Tools
         build_append_to_file_tool,
         build_run_command_tool,
       ]
+      ToolMiddleware.wrap_all(tools, @middlewares)
     end
 
     private def build_list_files_tool : Mantle::Tools::Tool

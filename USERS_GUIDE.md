@@ -198,7 +198,7 @@ Approve command? [y/N/e/a/p]:
 
 - **`y`**: Executes the command once without saving to the allowlist.
 - **`N` (or Enter)**: Rejects the command.
-- **`e`**: Allows inline operator editing before execution (runs once without saving).
+- **`e`**: Allows inline operator editing of the command, followed by re-confirmation in the approval modal before execution.
 - **`a`**: Saves the exact command string to the allowlist (auto-approved in future).
 - **`p`**: Saves the command prefix to the allowlist (e.g. `git status` allows future `git status ...`).
 - **`?`**: Displays detailed help explaining each option and reprompts.

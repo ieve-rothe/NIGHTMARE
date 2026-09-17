@@ -537,6 +537,8 @@ describe "Tier 1: Feature Coverage (Opaque-Box E2E)" do
           session.send_line("e")
           session.wait_for("Edit command:")
           session.send_line("echo 'good'")
+          session.wait_for("Approve")
+          session.send_line("y")
           session.send_line("/exit")
           session.wait_exit
         end

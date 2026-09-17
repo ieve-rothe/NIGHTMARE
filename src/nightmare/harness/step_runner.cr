@@ -36,23 +36,31 @@ module Nightmare::Harness
     )
     end
 
-    # Executes a full conversational turn through Mantle::Step with in-turn shedding and typed boundaries
+    # Executes a full conversational turn through Mantle::Step with in-turn shedding and typed boundaries.
+    # Accepts the active SlidingStore directly to prevent subagent/depth-1 state pollution.
     def run_turn(
+      store : Context::SlidingStore,
       system_prompt : String? = nil,
       pinned_block : String? = nil,
       &stream_callback : String -> Nil
     ) : TurnOutcome
       @retrier.execute do
-        execute_turn_attempt(system_prompt, pinned_block, &stream_callback)
+        run_turn_attempt(store, system_prompt, pinned_block, &stream_callback)
       end
     end
 
     # Overload for synchronous execution without stream block
-    def run_turn(system_prompt : String? = nil, pinned_block : String? = nil) : TurnOutcome
-      run_turn(system_prompt, pinned_block) { |_| }
+    def run_turn(
+      store : Context::SlidingStore,
+      system_prompt : String? = nil,
+      pinned_block : String? = nil
+    ) : TurnOutcome
+      run_turn(store, system_prompt, pinned_block) { |_| }
     end
 
-    private def execute_turn_attempt(
+    # Runs a single turn attempt against the provided SlidingStore
+    def run_turn_attempt(
+      store : Context::SlidingStore,
       system_prompt : String?,
       pinned_block : String?,
       &stream_callback : String -> Nil
@@ -60,7 +68,7 @@ module Nightmare::Harness
       @tool_loop.reset_turn
 
       if @tool_loop.cancelled?
-        rolled_back = @tool_loop.store.rollback_turn
+        rolled_back = store.rollback_turn
         effects = rolled_back.try(&.side_effects) || [] of String
         @transcript.try &.record_interruption(effects)
         @tool_loop.cancelled = false
@@ -70,13 +78,12 @@ module Nightmare::Harness
         )
       end
 
-      active = @tool_loop.store.active_turn
+      active = store.active_turn
       return TurnOutcome.failure(StepError.new(StepErrorKind::ClientFailure, "No active turn in store")) unless active
 
       # Record user message in transcript
       @transcript.try &.record(active.user_message)
 
-      wrapped_tools = wrap_tools_with_loop_detector(@tools, @tool_loop.loop_detector)
       overflow_retries_remaining = @overflow_retries
       format_retries_remaining = @format_retries
 
@@ -88,7 +95,7 @@ module Nightmare::Harness
       }
 
       loop do
-        messages = @tool_loop.store.assemble_messages(system_prompt, pinned_block)
+        messages = store.assemble_messages(system_prompt, pinned_block)
 
         on_iter = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
           if last_res
@@ -103,12 +110,12 @@ module Nightmare::Harness
               end
             end
           end
-          @tool_loop.on_iteration_hook.call(working_msgs, last_res)
+          @tool_loop.on_iteration_hook(store).call(working_msgs, last_res)
         }
 
         step = Mantle::Step.new(
           client: @client,
-          tools: wrapped_tools,
+          tools: @tools,
           max_iterations: @max_iterations,
           on_iteration: on_iter
         )
@@ -121,7 +128,7 @@ module Nightmare::Harness
             if overflow_retries_remaining > 0
               overflow_retries_remaining -= 1
               # Emergency shed and prune (T11)
-              recover_from_context_overflow
+              recover_from_context_overflow(store)
               next # retry turn
             else
               return TurnOutcome.failure(
@@ -136,17 +143,17 @@ module Nightmare::Harness
           if result.err? && result.error == Mantle::StepError::MalformedOutput
             if format_retries_remaining > 0
               format_retries_remaining -= 1
-              if active = @tool_loop.store.active_turn
-                active.messages << Mantle::Message.new("user", "The previous response had malformed output or arguments. Please reformat and proceed.")
+              if act = store.active_turn
+                act.messages << Mantle::Message.new("user", "The previous response had malformed output or arguments. Please reformat and proceed.")
               end
               next # retry turn with format correction
             end
           end
 
-          return process_step_result(result)
+          return process_step_result(result, store)
         rescue ex : CancelledException
           # User cancelled turn cooperatively (T12)
-          rolled_back = @tool_loop.store.rollback_turn
+          rolled_back = store.rollback_turn
           effects = rolled_back.try(&.side_effects) || [] of String
           @transcript.try &.record_interruption(effects)
           @tool_loop.cancelled = false
@@ -158,27 +165,33 @@ module Nightmare::Harness
           return TurnOutcome.failure(
             StepError.new(StepErrorKind::SpendCapExceeded, ex.message || "Spend cap exceeded")
           )
-        rescue ex
-          err_msg = (ex.message || "").downcase
-          if (err_msg.includes?("context") || err_msg.includes?("length")) && overflow_retries_remaining > 0
+        rescue ex : Mantle::Clients::APIError
+          if ex.context_overflow? && overflow_retries_remaining > 0
             overflow_retries_remaining -= 1
-            recover_from_context_overflow
+            recover_from_context_overflow(store)
             next
           end
 
           return TurnOutcome.failure(
-            StepError.new(StepErrorKind::ClientFailure, "Inference failure: #{ex.message}")
+            StepError.new(StepErrorKind::ClientFailure, "Inference API error (#{ex.status_code}): #{ex.message}")
+          )
+        rescue ex : IO::Error
+          return TurnOutcome.failure(
+            StepError.new(StepErrorKind::ClientFailure, "Network/IO failure: #{ex.message}")
           )
         end
       end
     end
 
-    private def process_step_result(result : Mantle::StepResult(String, Mantle::StepError)) : TurnOutcome
+    private def process_step_result(
+      result : Mantle::StepResult(String, Mantle::StepError),
+      store : Context::SlidingStore
+    ) : TurnOutcome
       if result.ok?
         text = result.value.not_nil!
 
         # Complete active turn if not already completed
-        if active = @tool_loop.store.active_turn
+        if active = store.active_turn
           if !active.complete?
             active.append_assistant(Mantle::Message.new("assistant", text))
           end
@@ -189,7 +202,7 @@ module Nightmare::Harness
           end
 
           # Check if turn exceeded shed trigger threshold:
-          hardmax = @tool_loop.store.hardmax
+          hardmax = store.hardmax
           trigger_threshold = (hardmax.to_f * @tool_loop.shed_trigger_ratio).to_i
           total_chars = active.messages.sum { |m| (m.content || "").size }
           estimated = if pt = @tool_loop.last_prompt_tokens
@@ -210,7 +223,7 @@ module Nightmare::Harness
             )
           end
 
-          @tool_loop.store.commit_turn
+          store.commit_turn
         end
 
         TurnOutcome.success(
@@ -259,14 +272,17 @@ module Nightmare::Harness
       if raw = result.raw_response
         return true if raw.truncated?
       end
+      if msg = result.error_message
+        return true if msg.includes?("context_length_exceeded") || msg.includes?("maximum context length")
+      end
       false
     end
 
-    private def recover_from_context_overflow : Nil
-      hardmax = @tool_loop.store.hardmax
+    private def recover_from_context_overflow(store : Context::SlidingStore) : Nil
+      hardmax = store.hardmax
       current_tokens = hardmax + 1000
 
-      if active = @tool_loop.store.active_turn
+      if active = store.active_turn
         Context::Shedder.shed_active_turn!(
           active,
           current_tokens: current_tokens,
@@ -279,55 +295,11 @@ module Nightmare::Harness
       end
 
       Context::Shedder.prune_history!(
-        @tool_loop.store.history,
+        store.history,
         current_tokens: current_tokens,
         hardmax: hardmax,
         calibrator: @tool_loop.calibrator
       )
-    end
-
-    private def wrap_tools_with_loop_detector(
-      tools : Array(Mantle::Tools::Tool),
-      detector : LoopDetector
-    ) : Array(Mantle::Tools::Tool)
-      tools.map do |tool|
-        orig_handler = tool.handler
-        wrapped = tool.dup
-        wrapped.handler = ->(args : Hash(String, JSON::Any)) {
-          tool_name = tool.function.name
-          args_json = args.to_json
-          refused, msg = detector.check(tool_name, args_json)
-          if refused
-            puts msg.not_nil!
-            STDOUT.flush
-            msg.not_nil!
-          elsif orig_handler
-            begin
-              res = orig_handler.call(args)
-              if presenter = @turn_presenter
-                presenter.present_tool_result(tool_name, args, res)
-              else
-                puts res
-                STDOUT.flush
-              end
-              res
-            rescue ex : SecurityError
-              err = "[SecurityError: #{ex.message}]"
-              puts err
-              STDOUT.flush
-              err
-            rescue ex
-              err = "[Tool error: #{ex.message}]"
-              puts err
-              STDOUT.flush
-              err
-            end
-          else
-            {error: "No handler for #{tool_name}"}.to_json
-          end
-        }
-        wrapped
-      end
     end
   end
 end

@@ -110,14 +110,20 @@ module Nightmare::UI
           edited = @input.gets.try(&.strip) || ""
           return {Tools::ApprovalOutcome::Edit, edited}
         when "a"
+          if has_metachar
+            @output.puts "Notice: Shell metacharacters cannot be saved to allowlist. Running once without saving."
+          end
           return {Tools::ApprovalOutcome::AllSession, nil}
         when "p"
+          if has_metachar
+            @output.puts "Notice: Shell metacharacters cannot be saved to allowlist. Running once without saving."
+          end
           return {Tools::ApprovalOutcome::PrefixSession, nil}
         when "?", "help"
           @output.puts "\nApproval options:"
           @output.puts "  y - Approve once (don't save)"
           @output.puts "  N - Reject command (default)"
-          @output.puts "  e - Edit command inline before running once (don't save)"
+          @output.puts "  e - Edit command inline (re-prompts for approval before running)"
           @output.puts "  a - Save exact command to allowlist (auto-approved in future)"
           @output.puts "  p - Save command prefix to allowlist (commands matching prefix auto-approved in future)"
           @output.puts

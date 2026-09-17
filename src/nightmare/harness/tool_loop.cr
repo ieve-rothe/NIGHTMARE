@@ -50,15 +50,16 @@ module Nightmare::Harness
     end
 
     # Supplies the Mantle on_iteration hook Proc for in-turn working buffer projection
-    def on_iteration_hook : Proc(Array(Mantle::Message), Mantle::Clients::Response?, Array(Mantle::Message))
+    def on_iteration_hook(store : Context::SlidingStore) : Proc(Array(Mantle::Message), Mantle::Clients::Response?, Array(Mantle::Message))
       ->(working_messages : Array(Mantle::Message), last_response : Mantle::Clients::Response?) {
-        handle_iteration(working_messages, last_response)
+        handle_iteration(working_messages, last_response, store)
       }
     end
 
     private def handle_iteration(
       working_messages : Array(Mantle::Message),
-      last_response : Mantle::Clients::Response?
+      last_response : Mantle::Clients::Response?,
+      store : Context::SlidingStore
     ) : Array(Mantle::Message)
       # 1. Cooperative cancellation check
       if @cancelled
@@ -69,7 +70,7 @@ module Nightmare::Harness
       if last = last_response
         if prompt_tokens = last.prompt_eval_count
           @last_prompt_tokens = prompt_tokens
-          if active = @store.active_turn
+          if active = store.active_turn
             active.prompt_tokens = prompt_tokens
           end
 
@@ -86,7 +87,7 @@ module Nightmare::Harness
       end
 
       # 3. Synchronize working_messages to active_turn messages
-      if active = @store.active_turn
+      if active = store.active_turn
         # Find index in working_messages where active turn messages start
         # working_messages has [system, ..., history..., active_messages...]
         # Synchronize new assistant and tool messages into active_turn
@@ -101,11 +102,11 @@ module Nightmare::Harness
         @calibrator.estimate(total_chars)
       end
 
-      hardmax = @store.hardmax
+      hardmax = store.hardmax
       trigger_threshold = (hardmax.to_f * @shed_trigger_ratio).to_i
 
       if estimated > trigger_threshold
-        if active = @store.active_turn
+        if active = store.active_turn
           estimated = Context::Shedder.shed_active_turn!(
             active,
             current_tokens: estimated,
@@ -120,7 +121,7 @@ module Nightmare::Harness
 
       if estimated > hardmax
         Context::Shedder.prune_history!(
-          @store.history,
+          store.history,
           current_tokens: estimated,
           hardmax: hardmax,
           calibrator: @calibrator
@@ -128,7 +129,7 @@ module Nightmare::Harness
       end
 
       # 5. Authoritative buffer rewrite via #map with keyword tool_call_id:
-      if active = @store.active_turn
+      if active = store.active_turn
         working_messages.map do |msg|
           if msg.role == "tool"
             # Find matching exchange in active turn

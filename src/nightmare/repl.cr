@@ -101,7 +101,14 @@ module Nightmare
         Mantle::Clients::LoggingClient.new(raw_client, @env.log_path)
       end
 
-      # 7. Subagent runner & Registry with approval hooks
+      # 7. UI Presenter & Subagent runner
+      @turn_presenter = UI::TurnPresenter.new(
+        calibrator: @calibrator,
+        threshold_multiplier: @env.settings.file_card_threshold_screens,
+        preview_lines: @env.settings.file_card_preview_lines,
+        max_width: @env.settings.max_dashboard_width
+      )
+
       diff_cb = ->(diff : String, desc : String) { @approval.approve_diff(diff, desc) }
       shell_cb = ->(cmd : String, argv : Array(String), meta : Bool, to : Int32) {
         @approval.approve_command(cmd, argv, meta, to)
@@ -112,9 +119,12 @@ module Nightmare
         environment: @env,
         pacer: nil,
         diff_approval: diff_cb,
-        shell_approval: shell_cb
+        shell_approval: shell_cb,
+        turn_presenter: @turn_presenter
       )
 
+      # 8. Registry & Hardened Tools with Middleware
+      loop_detector = Harness::LoopDetector.new(threshold: @env.settings.loop_detect_threshold)
       @registry = Tools::Registry.new(
         guard: @guard,
         client: client,
@@ -127,10 +137,14 @@ module Nightmare
         tool_output_max_bytes: @env.settings.tool_output_max_bytes,
         subagent_runner: subagent_runner
       )
+      @registry.middlewares = [
+        ToolMiddleware::Presentation.new(@turn_presenter),
+        ToolMiddleware::LoopDetector.new(loop_detector),
+        ToolMiddleware::ExceptionTrapping.new,
+      ] of ToolMiddleware::Base
       tools = @registry.build_tools
 
-      # 8. Harness
-      loop_detector = Harness::LoopDetector.new(threshold: @env.settings.loop_detect_threshold)
+      # 9. Harness & StepRunner
       @tool_loop = Harness::ToolLoop.new(
         store: @store,
         calibrator: @calibrator,
@@ -151,16 +165,8 @@ module Nightmare
         format_retries: @env.settings.format_retries,
         overflow_retries: @env.settings.context_overflow_retries
       )
-
-      # 9. UI & Commands
-      @turn_presenter = UI::TurnPresenter.new(
-        calibrator: @calibrator,
-        threshold_multiplier: @env.settings.file_card_threshold_screens,
-        preview_lines: @env.settings.file_card_preview_lines,
-        max_width: @env.settings.max_dashboard_width
-      )
       @step_runner.turn_presenter = @turn_presenter
-      subagent_runner.turn_presenter = @turn_presenter
+
       @stream_ctrl = UI::StreamController.new
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       on_model = ->(new_model : String) {
@@ -245,6 +251,7 @@ module Nightmare
       turn_sequence_id = UUID.random.to_s
       outcome = Mantle::LogContext.with_sequence_id(turn_sequence_id) do
         @step_runner.run_turn(
+          store: @store,
           system_prompt: @router.current_prompt,
           pinned_block: pinned_block
         ) do |chunk|

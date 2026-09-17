@@ -144,13 +144,14 @@ module Nightmare::Tools
         "TMPDIR"              => ENV["TMPDIR"]? || "/tmp"
       }
 
-      # Launch via direct argv (ARCHITECTURE_R3 §4.2)
+      # Launch via bash -c within process group supervisor
       # Launch under setsid -w to establish independent session & process group
       has_setsid = File.exists?("/usr/bin/setsid") || File.exists?("/bin/setsid")
       setsid_bin = File.exists?("/usr/bin/setsid") ? "/usr/bin/setsid" : "/bin/setsid"
+      bash_bin = Process.find_executable("bash") || "/bin/sh"
 
-      executable = has_setsid ? setsid_bin : argv[0]
-      cmd_args = has_setsid ? (["-w", argv[0]] + argv[1..]) : argv[1..]
+      executable = has_setsid ? setsid_bin : bash_bin
+      cmd_args = has_setsid ? ["-w", bash_bin, "-c", command_string] : ["-c", command_string]
 
       dev_null = File.open("/dev/null", "r")
 

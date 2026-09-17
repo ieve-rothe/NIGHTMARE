@@ -33,7 +33,7 @@ module Nightmare::Tools
           return "File #{rel_path} is already up to date (no changes)."
         end
 
-        unless approve_mutation?(diff_text, "Overwrite #{rel_path}")
+        unless approve_mutation?(diff_text, "overwrite #{rel_path}")
           return "[Execution rejected by user]"
         end
       else
@@ -68,7 +68,7 @@ module Nightmare::Tools
       updated = original.sub(target, replacement)
       diff_text = Diff.unified_diff(original, updated, rel_path)
 
-      unless approve_mutation?(diff_text, "Replace target in #{rel_path}")
+      unless approve_mutation?(diff_text, "overwrite #{rel_path} (replace target)")
         return "[Execution rejected by user]"
       end
 
@@ -88,7 +88,7 @@ module Nightmare::Tools
         updated = original.ends_with?('\n') ? "#{original}#{content}" : "#{original}\n#{content}"
         diff_text = Diff.unified_diff(original, updated, rel_path)
 
-        unless approve_mutation?(diff_text, "Append to #{rel_path}")
+        unless approve_mutation?(diff_text, "append to #{rel_path}")
           return "[Execution rejected by user]"
         end
 
