@@ -56,6 +56,12 @@ describe "Ghost Mode & Logging Control (R7, D6)" do
         Dir.exists?(xdg_config).should be_false
         Dir.exists?(xdg_state).should be_false
         Dir.exists?(xdg_cache).should be_false
+
+        # 6. Startup banner shows --no-logs mode and nothing is persisted
+        banner = env.startup_banner(no_log: repl.no_log?)
+        banner.should contain("Mode      : --no-logs (nothing is persisted)")
+        banner.should_not contain("Config    :")
+        banner.should_not contain("State/Logs:")
       end
     end
   end

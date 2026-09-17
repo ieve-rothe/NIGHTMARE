@@ -192,7 +192,7 @@ module Nightmare
     end
 
     def start : Nil
-      puts @env.startup_banner
+      puts @env.startup_banner(no_log: @no_log)
       STDOUT.flush
 
       loop do

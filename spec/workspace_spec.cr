@@ -219,6 +219,25 @@ describe Nightmare::Workspace do
           lines.first.size.should be >= 76
         end
       end
+
+      it "renders --no-logs banner showing nothing is persisted instead of config/state folders" do
+        with_temp_dir do |dir|
+          env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false, no_log: true)
+          banner = env.startup_banner
+
+          banner.should contain("┌── NIGHTMARE ")
+          banner.should contain("│ Workspace : #{env.root}")
+          banner.should contain("│ Mode      : --no-logs (nothing is persisted)")
+          banner.should_not contain("Config    :")
+          banner.should_not contain("State/Logs:")
+          banner.should contain("└─")
+
+          lines = banner.lines
+          lines.size.should eq(4)
+          lines.map(&.size).uniq.size.should eq(1)
+          lines.first.size.should be >= 76
+        end
+      end
     end
   end
 

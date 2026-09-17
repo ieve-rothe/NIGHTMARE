@@ -132,7 +132,11 @@ module Nightmare
       end
 
       begin
-        env = Workspace::Environment.resolve(options.target_dir, ensure_dirs: !options.no_log)
+        env = Workspace::Environment.resolve(
+          options.target_dir,
+          ensure_dirs: !options.no_log,
+          no_log: options.no_log
+        )
         repl = REPL.new(
           env: env,
           system_prompt_path: options.system_prompt_path,

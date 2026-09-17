@@ -27,6 +27,7 @@ module Nightmare::Workspace
     getter manifest : Manifest
     getter settings : Settings
     getter? ensure_dirs : Bool
+    getter? no_log : Bool
 
     def workspace_config_dir : String
       @config_dir
@@ -45,7 +46,8 @@ module Nightmare::Workspace
       xdg_config_home : String? = nil,
       xdg_state_home : String? = nil,
       xdg_cache_home : String? = nil,
-      @ensure_dirs : Bool = true
+      @ensure_dirs : Bool = true,
+      @no_log : Bool = false
     )
       @root = File.realpath(root_path)
 
@@ -93,7 +95,8 @@ module Nightmare::Workspace
       xdg_config_home : String? = nil,
       xdg_state_home : String? = nil,
       xdg_cache_home : String? = nil,
-      ensure_dirs : Bool = true
+      ensure_dirs : Bool = true,
+      no_log : Bool = false
     ) : Environment
       unless Dir.exists?(current_dir) || File.exists?(current_dir)
         raise ArgumentError.new("Workspace directory does not exist: #{current_dir}")
@@ -104,7 +107,8 @@ module Nightmare::Workspace
         xdg_config_home: xdg_config_home,
         xdg_state_home: xdg_state_home,
         xdg_cache_home: xdg_cache_home,
-        ensure_dirs: ensure_dirs
+        ensure_dirs: ensure_dirs,
+        no_log: no_log
       )
     end
 
@@ -131,29 +135,40 @@ module Nightmare::Workspace
       false
     end
 
-    def startup_banner : String
-      home = Path.home.to_s
-      config_disp = @config_dir.starts_with?(home) ? "~" + @config_dir[home.size..] : @config_dir
-      state_disp = @state_dir.starts_with?(home) ? "~" + @state_dir[home.size..] : @state_dir
-      config_disp += "/" unless config_disp.ends_with?("/")
-      state_disp += "/" unless state_disp.ends_with?("/")
+    def startup_banner(no_log : Bool? = nil) : String
+      active_no_log = no_log.nil? ? @no_log : no_log
 
       l1 = "Workspace : #{@root}"
-      l2 = "Config    : #{config_disp}"
-      l3 = "State/Logs: #{state_disp}"
 
-      content_width = [72, [l1.size, l2.size, l3.size].max].max
+      lines = if active_no_log
+        [
+          l1,
+          "Mode      : --no-logs (nothing is persisted)",
+        ]
+      else
+        home = Path.home.to_s
+        config_disp = @config_dir.starts_with?(home) ? "~" + @config_dir[home.size..] : @config_dir
+        state_disp = @state_dir.starts_with?(home) ? "~" + @state_dir[home.size..] : @state_dir
+        config_disp += "/" unless config_disp.ends_with?("/")
+        state_disp += "/" unless state_disp.ends_with?("/")
+
+        [
+          l1,
+          "Config    : #{config_disp}",
+          "State/Logs: #{state_disp}",
+        ]
+      end
+
+      content_width = [72, lines.map(&.size).max].max
 
       title = "── NIGHTMARE "
       top_dashes = content_width + 2 - title.size
       top = "┌#{title}#{"─" * [top_dashes, 1].max}┐"
 
-      row1 = "│ #{l1.ljust(content_width)} │"
-      row2 = "│ #{l2.ljust(content_width)} │"
-      row3 = "│ #{l3.ljust(content_width)} │"
+      rows = lines.map { |line| "│ #{line.ljust(content_width)} │" }
       bot = "└#{"─" * (content_width + 2)}┘"
 
-      [top, row1, row2, row3, bot].join("\n")
+      ([top] + rows + [bot]).join("\n")
     end
 
     private def resolve_contained_path(path : String) : String

@@ -62,6 +62,15 @@ Upon launch, NIGHTMARE displays a banner summarizing the workspace boundaries an
 | **Config** | Location of workspace-specific configurations (e.g., allowlists, saved prompts). |
 | **State/Logs** | Location of runtime state and logs (e.g., `llm_calls.jsonl`). |
 
+In `--no-logs` mode, disk configuration and state/log folders are not created or persisted. The banner reflects zero-persistence ghost mode:
+
+```text
+┌── NIGHTMARE ────────────────────────────────────────────────────────┐
+│ Workspace : /home/cam/projects/my-app                               │
+│ Mode      : --no-logs (nothing is persisted)                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
 ## CLI Flags Reference
 
 Use command-line flags to override default behaviors for the current session.
