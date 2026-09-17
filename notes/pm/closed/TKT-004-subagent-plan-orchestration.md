@@ -1,7 +1,7 @@
 ---
 ID: TKT-004
 Title: Programmatic Plan Orchestration with Deterministic Gates and Subagent Execution
-Status: Resolved
+Status: Closed
 Priority: High
 ---
 
@@ -95,4 +95,5 @@ See full documentation in [`docs/guide/08-plan-orchestrator.md`](../docs/guide/0
 * 2026-09-11: Added Hardware Pacing & GPU Thermal Rails.
 * 2026-09-11: Second-pass review updates: gate as sole authority, test-set monotonicity, description-path keys, transaction group semantics, worktree setup/sanity checks, glob targets, subcommand allowlisting, restored API contracts, and M0 eval thresholds.
 * 2026-09-12: Full implementation completed across Mantle and Nightmare; all test suites passing. Marked Resolved.
+* 2026-09-17: Verification confirmed across test suites (Nightmare 263/263, Mantle 308/308, Empaws 17/17). Formally closed and moved to notes/pm/closed/.
 ---
