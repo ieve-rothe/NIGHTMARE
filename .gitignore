@@ -1,5 +1,6 @@
 /docs/*
 !/docs/*.md
+!/docs/guide/
 /lib/
 /bin/
 /.shards/
