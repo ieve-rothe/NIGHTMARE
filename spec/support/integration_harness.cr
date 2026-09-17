@@ -41,6 +41,8 @@ module Nightmare::Integration
     getter xdg_config : String
     getter xdg_state : String
     getter xdg_cache : String
+    getter xdg_data : String
+    getter home_dir : String
     getter workspace_id : String
     getter initial_files : Set(String)
 
@@ -55,6 +57,8 @@ module Nightmare::Integration
       @xdg_config = WorkspaceSandbox.make_temp_dir("#{@prefix}cfg_")
       @xdg_state = WorkspaceSandbox.make_temp_dir("#{@prefix}state_")
       @xdg_cache = WorkspaceSandbox.make_temp_dir("#{@prefix}cache_")
+      @xdg_data = WorkspaceSandbox.make_temp_dir("#{@prefix}data_")
+      @home_dir = WorkspaceSandbox.make_temp_dir("#{@prefix}home_")
 
       slug = File.basename(@root_path).gsub(/[^a-zA-Z0-9_-]/, "_")
       hash = Digest::SHA256.hexdigest(@root_path)[0..7]
@@ -164,11 +168,21 @@ module Nightmare::Integration
       end
     end
 
+    private def safe_rm_rf(dir : String) : Nil
+      temp_root = File.realpath(Dir.tempdir)
+      real = File.realpath(dir) rescue nil
+      if real && real.starts_with?(temp_root) && real != temp_root
+        FileUtils.rm_rf(real)
+      end
+    end
+
     def cleanup! : Nil
-      FileUtils.rm_rf(@root_path) if Dir.exists?(@root_path)
-      FileUtils.rm_rf(@xdg_config) if Dir.exists?(@xdg_config)
-      FileUtils.rm_rf(@xdg_state) if Dir.exists?(@xdg_state)
-      FileUtils.rm_rf(@xdg_cache) if Dir.exists?(@xdg_cache)
+      safe_rm_rf(@root_path) if Dir.exists?(@root_path)
+      safe_rm_rf(@xdg_config) if Dir.exists?(@xdg_config)
+      safe_rm_rf(@xdg_state) if Dir.exists?(@xdg_state)
+      safe_rm_rf(@xdg_cache) if Dir.exists?(@xdg_cache)
+      safe_rm_rf(@xdg_data) if Dir.exists?(@xdg_data)
+      safe_rm_rf(@home_dir) if Dir.exists?(@home_dir)
     end
   end
 
@@ -192,12 +206,9 @@ module Nightmare::Integration
           @requests << {path: req.path, method: req.method, body: body_str}
         end
 
-        handled = false
-        @mutex.synchronize do
-          if handler = @handlers.shift?
-            handled = handler.call(context)
-          end
-        end
+        # Dequeue under mutex, execute handler outside mutex to prevent socket IO blocking
+        handler = @mutex.synchronize { @handlers.shift? }
+        handled = handler ? handler.call(context) : false
 
         unless handled
           context.response.content_type = "application/json"
@@ -220,11 +231,24 @@ module Nightmare::Integration
       @port = addr.port
     end
 
+    def recorded_requests : Array(NamedTuple(path: String, method: String, body: String))
+      @mutex.synchronize { @requests.dup }
+    end
+
+    def assert_all_consumed! : Nil
+      remaining = @mutex.synchronize { @handlers.size }
+      if remaining > 0
+        raise "MockLlmServer still has #{remaining} unconsumed response handler(s)!"
+      end
+    end
+
     def start : Nil
       return if @running
       @running = true
       spawn do
         @server.listen
+      rescue Socket::Error
+        # Clean exit on close
       end
       Fiber.yield
     end
@@ -289,6 +313,33 @@ module Nightmare::Integration
             prompt_eval_count: prompt_tokens,
             eval_count: 30
           }.to_json)
+          true
+        }
+      end
+    end
+
+    def enqueue_stream_response(chunks : Array(String), prompt_tokens : Int32 = 50, chunk_delay : Time::Span = 30.milliseconds) : Nil
+      @mutex.synchronize do
+        @handlers << ->(ctx : HTTP::Server::Context) {
+          ctx.response.content_type = "application/x-ndjson"
+          ctx.response.status_code = 200
+          chunks.each_with_index do |chunk, idx|
+            is_last = (idx == chunks.size - 1)
+            payload = {
+              model: "mock-model",
+              created_at: Time.utc.to_s,
+              message: {
+                role: "assistant",
+                content: chunk
+              },
+              done: is_last,
+              prompt_eval_count: is_last ? prompt_tokens : nil,
+              eval_count: is_last ? chunks.size * 5 : nil
+            }
+            ctx.response.puts(payload.to_json)
+            ctx.response.flush
+            sleep chunk_delay unless is_last
+          end
           true
         }
       end
@@ -392,12 +443,13 @@ module Nightmare::Integration
     def wait_for(pattern : Regex | String, timeout : Time::Span = 2.seconds, from_start : Bool = false) : String
       deadline = Time.instant + timeout
       loop do
-        current = stdout
         matched = false
         match_len = 0
         match_idx = 0
+        current = ""
 
         @mutex.synchronize do
+          current = @out_buf.to_s
           search_start = from_start ? 0 : @out_cursor
           slice = search_start < current.size ? current[search_start..] : ""
 
@@ -431,12 +483,13 @@ module Nightmare::Integration
     def wait_for_error(pattern : Regex | String, timeout : Time::Span = 2.seconds, from_start : Bool = false) : String
       deadline = Time.instant + timeout
       loop do
-        current = stderr
         matched = false
         match_len = 0
         match_idx = 0
+        current = ""
 
         @mutex.synchronize do
+          current = @err_buf.to_s
           search_start = from_start ? 0 : @err_cursor
           slice = search_start < current.size ? current[search_start..] : ""
 
@@ -482,8 +535,13 @@ module Nightmare::Integration
     def terminate! : Nil
       return if @terminated
       @terminated = true
+      # Kill the process group first to reap any child processes
+      Process.run("kill", ["-KILL", "-#{@process.pid}"]) rescue nil
       @process.signal(Signal::KILL) rescue nil
       @process.wait rescue nil
+      @process.input.close rescue nil
+      @process.output.close rescue nil
+      @process.error.close rescue nil
     end
   end
 
@@ -515,16 +573,20 @@ module Nightmare::Integration
     ensure_binary!
 
     env = {
+      "HOME"            => sandbox.home_dir,
       "XDG_CONFIG_HOME" => sandbox.xdg_config,
       "XDG_STATE_HOME"  => sandbox.xdg_state,
       "XDG_CACHE_HOME"  => sandbox.xdg_cache,
+      "XDG_DATA_HOME"   => sandbox.xdg_data,
+      "TMPDIR"          => sandbox.root_path,
       "TERM"            => "dumb",
       "CI"              => "1"
     }.merge(extra_env)
 
+    # Launch with setsid -w to establish an isolated process group for clean process tree termination
     proc = Process.new(
-      bin_path,
-      args: args,
+      "setsid",
+      ["-w", bin_path] + args,
       env: env,
       chdir: sandbox.root_path,
       input: Process::Redirect::Pipe,
@@ -533,8 +595,27 @@ module Nightmare::Integration
     )
 
     session = ProcessSession.new(proc)
+    if proc.terminated?
+      raise "Nightmare terminated on boot! Exit code: #{proc.wait.exit_code}. Stderr:\n#{session.stderr}"
+    end
+
     session.wait_for(/(?:>|❯|▶)/, timeout: 1.second) rescue nil
     session
+  end
+
+  def self.with_session(
+    sandbox : WorkspaceSandbox,
+    args : Array(String) = [] of String,
+    extra_env : Hash(String, String) = {} of String => String,
+    bin_path : String = BIN_PATH,
+    &block : ProcessSession -> Nil
+  ) : Nil
+    session = spawn_nightmare(sandbox, args, extra_env, bin_path)
+    begin
+      block.call(session)
+    ensure
+      session.terminate!
+    end
   end
 end
 
