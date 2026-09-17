@@ -20,6 +20,15 @@ module Nightmare::Harness
   class ContextOverflowException < Exception
   end
 
+  class LoopCircuitBreakerException < Mantle::Tools::TerminalToolError
+    getter tool_name : String
+    getter args_json : String
+
+    def initialize(message : String, @tool_name : String = "", @args_json : String = "")
+      super(message)
+    end
+  end
+
   class ToolLoop
     getter store : Context::SlidingStore
     getter calibrator : Context::TokenEstimator
@@ -29,7 +38,7 @@ module Nightmare::Harness
     getter last_prompt_tokens : Int32? = nil
     getter spend_cap : Int32
     getter shed_trigger_ratio : Float64
-    getter shed_keep_chars : Int32
+    getter shed_keep_chars : Int32?
     getter shed_keep_verbatim : Int32
 
     def initialize(
@@ -38,7 +47,7 @@ module Nightmare::Harness
       @loop_detector : LoopDetector = LoopDetector.new,
       @spend_cap : Int32 = Config::TURN_SPEND_CAP_TOKENS,
       @shed_trigger_ratio : Float64 = Config::SHED_TRIGGER_RATIO,
-      @shed_keep_chars : Int32 = Config::SHED_KEEP_CHARS,
+      @shed_keep_chars : Int32? = nil,
       @shed_keep_verbatim : Int32 = Config::SHED_KEEP_VERBATIM
     )
     end

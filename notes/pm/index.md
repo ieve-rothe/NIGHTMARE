@@ -18,3 +18,4 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-004](notes/pm/closed/TKT-004-subagent-plan-orchestration.md) | Programmatic Plan Orchestration with Deterministic Gates and Subagent Execution | Autonomous Workflows & Subagents | Closed | High | 2026-09-17 |
 | [TKT-006](notes/pm/closed/TKT-006-fix-well-formed-turn-invariant-format-retry.md) | Fix Well-Formed Turn Invariant Assertion During Format-Correction Retries | Context & Harness Invariant Integrity | Closed | High | 2026-09-17 |
 | [TKT-007](notes/pm/closed/TKT-007-cleanup-deprecated-documentation.md) | Deprecate and Consolidate Documentation in docs/ | Documentation & Architecture | Closed | Med | 2026-09-17 |
+| [TKT-008](notes/pm/TKT-008-fix-tool-line-numbering-and-loop-detector-halt.md) | Hard Circuit Breaker for Loop Detection, Line-Anchored Mutation Interface, and Tool-Conditioned Shedding | Harness Stability & Tool Ergonomics | Resolved | High | 2026-09-17 |

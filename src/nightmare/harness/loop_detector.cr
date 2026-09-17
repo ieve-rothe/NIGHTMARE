@@ -8,6 +8,10 @@ module Nightmare::Harness
   class LoopDetector
     getter counts : Hash(Tuple(String, String), Int32)
     getter threshold : Int32
+    getter? tripped : Bool = false
+    getter last_refusal : String? = nil
+    getter tripped_tool : String? = nil
+    getter tripped_args : String? = nil
 
     def initialize(@threshold : Int32 = Config::LOOP_DETECT_THRESHOLD)
       @counts = Hash(Tuple(String, String), Int32).new(0)
@@ -16,6 +20,10 @@ module Nightmare::Harness
     # Resets the call tracking table for a new turn
     def reset : Nil
       @counts.clear
+      @tripped = false
+      @last_refusal = nil
+      @tripped_tool = nil
+      @tripped_args = nil
     end
 
     # Checks whether (tool, args) has exceeded the loop threshold.
@@ -25,7 +33,11 @@ module Nightmare::Harness
       @counts[key] += 1
 
       if @counts[key] >= @threshold
-        refusal = "[Refused: identical call repeated #{@threshold} times. Change approach or ask the user.]"
+        @tripped = true
+        @tripped_tool = tool_name
+        @tripped_args = args_json
+        refusal = "ERR_DEGENERATE_LOOP: identical call to #{tool_name} repeated #{@threshold} times. Halting execution."
+        @last_refusal = refusal
         {true, refusal}
       else
         {false, nil}

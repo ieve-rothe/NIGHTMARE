@@ -160,12 +160,36 @@ module Nightmare::Context
       @turn.messages[@index]
     end
 
-    def shed!(keep_chars : Int32 = Config::SHED_KEEP_CHARS) : Nil
+    def shed!(keep_chars : Int32? = nil) : Nil
       return if @shed
       msg = @turn.messages[@index]
       content = msg.content || ""
-      return if content.size <= keep_chars
-      msg.content = "#{content[0, keep_chars]}\n[... output truncated: was #{@raw_size_bytes} bytes]"
+
+      tool_name = @call.function.name
+      actual_keep_chars = if keep_chars
+        keep_chars
+      elsif tool_name == "run_command"
+        Config::SHED_SHELL_KEEP_CHARS
+      elsif tool_name == "read_file"
+        Config::SHED_FILE_KEEP_CHARS
+      else
+        Config::SHED_KEEP_CHARS
+      end
+
+      return if content.size <= actual_keep_chars
+
+      if tool_name == "run_command"
+        tail_start = content.size - actual_keep_chars
+        tail_content = content[tail_start..]
+        msg.content = "[... earlier output shed: was #{@raw_size_bytes} bytes]\n#{tail_content}"
+      elsif tool_name == "read_file"
+        head_content = content[0, actual_keep_chars]
+        msg.content = "#{head_content}\n[... remaining output shed: was #{@raw_size_bytes} bytes]"
+      else
+        head_content = content[0, actual_keep_chars]
+        msg.content = "#{head_content}\n[... output truncated: was #{@raw_size_bytes} bytes]"
+      end
+
       @turn.messages[@index] = msg     # WRITE-BACK — required
       @shed = true
     end

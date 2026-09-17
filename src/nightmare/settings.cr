@@ -34,6 +34,8 @@ module Nightmare
     property pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO
     property shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO
     property shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS
+    property shed_shell_keep_chars : Int32 = Nightmare::Config::SHED_SHELL_KEEP_CHARS
+    property shed_file_keep_chars : Int32 = Nightmare::Config::SHED_FILE_KEEP_CHARS
     property shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM
     property initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR
     property file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS
@@ -66,6 +68,8 @@ module Nightmare
       @pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO,
       @shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO,
       @shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS,
+      @shed_shell_keep_chars : Int32 = Nightmare::Config::SHED_SHELL_KEEP_CHARS,
+      @shed_file_keep_chars : Int32 = Nightmare::Config::SHED_FILE_KEEP_CHARS,
       @shed_keep_verbatim : Int32 = Nightmare::Config::SHED_KEEP_VERBATIM,
       @initial_divisor : Float64 = Nightmare::Config::INITIAL_DIVISOR,
       @file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS,

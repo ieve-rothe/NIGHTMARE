@@ -29,7 +29,7 @@ module Nightmare::Context
       current_tokens : Int32,
       hardmax : Int32 = Config::TOKEN_HARDMAX,
       trigger_ratio : Float64 = Config::SHED_TRIGGER_RATIO,
-      keep_chars : Int32 = Config::SHED_KEEP_CHARS,
+      keep_chars : Int32? = nil,
       keep_verbatim : Int32 = Config::SHED_KEEP_VERBATIM,
       calibrator : TokenEstimator? = nil
     ) : Int32
@@ -70,7 +70,7 @@ module Nightmare::Context
       history : Array(Turn),
       current_tokens : Int32,
       hardmax : Int32 = Config::TOKEN_HARDMAX,
-      keep_chars : Int32 = Config::SHED_KEEP_CHARS,
+      keep_chars : Int32? = nil,
       keep_verbatim : Int32 = Config::SHED_KEEP_VERBATIM,
       calibrator : TokenEstimator? = nil
     ) : Int32

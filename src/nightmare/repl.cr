@@ -153,7 +153,7 @@ module Nightmare
         loop_detector: loop_detector,
         spend_cap: @env.settings.turn_spend_cap_tokens,
         shed_trigger_ratio: @env.settings.shed_trigger_ratio,
-        shed_keep_chars: @env.settings.shed_keep_chars,
+        shed_keep_chars: nil,
         shed_keep_verbatim: @env.settings.shed_keep_verbatim
       )
       retrier = Harness::Retrier.new(max_retries: @env.settings.rate_limit_retries)

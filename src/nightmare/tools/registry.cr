@@ -120,7 +120,11 @@ module Nightmare::Tools
         "limit"  => Mantle::Tools::PropertyDefinition.new("integer", "Maximum number of lines to read"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["path"])
-      func = Mantle::Tools::FunctionDefinition.new("read_file", "Reads file contents safely with optional line offset and limit.", schema)
+      func = Mantle::Tools::FunctionDefinition.new(
+        "read_file",
+        "Reads file contents safely with optional line offset and limit. Returns file contents with '<line> | ' prefixes for line referencing. Use these line numbers with replace_in_file's 'start_line' and 'end_line'.",
+        schema
+      )
 
       Mantle::Tools::Tool.new(func) do |args|
         path = args["path"]?.try(&.as_s?) || args["filepath"]?.try(&.as_s?) || ""
@@ -163,17 +167,27 @@ module Nightmare::Tools
     private def build_replace_in_file_tool : Mantle::Tools::Tool
       props = {
         "path"        => Mantle::Tools::PropertyDefinition.new("string", "Path to file to edit"),
-        "target"      => Mantle::Tools::PropertyDefinition.new("string", "Exact unique substring to replace"),
+        "target"      => Mantle::Tools::PropertyDefinition.new("string", "Exact unique substring to replace (optional if start_line/end_line provided)"),
         "replacement" => Mantle::Tools::PropertyDefinition.new("string", "Replacement content"),
+        "start_line"  => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based start line number for line-anchored replacement"),
+        "end_line"    => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based end line number for line-anchored replacement"),
       }
-      schema = Mantle::Tools::ParametersSchema.new(props, ["path", "target", "replacement"])
-      func = Mantle::Tools::FunctionDefinition.new("replace_in_file", "Replaces unique substring in existing file with diff approval.", schema)
+      schema = Mantle::Tools::ParametersSchema.new(props, ["path", "replacement"])
+      func = Mantle::Tools::FunctionDefinition.new(
+        "replace_in_file",
+        "Replaces unique substring or line-anchored range (start_line..end_line) in existing file with diff approval.",
+        schema
+      )
 
       Mantle::Tools::Tool.new(func) do |args|
         path = args["path"]?.try(&.as_s) || ""
         target = args["target"]?.try(&.as_s) || ""
         replacement = args["replacement"]?.try(&.as_s) || ""
-        @mutation.replace_in_file(path, target, replacement)
+        raw_start = args["start_line"]?
+        start_line = raw_start.try(&.as_i?) || raw_start.try(&.as_s?.try(&.to_i?))
+        raw_end = args["end_line"]?
+        end_line = raw_end.try(&.as_i?) || raw_end.try(&.as_s?.try(&.to_i?))
+        @mutation.replace_in_file(path, target, replacement, start_line, end_line)
       end
     end
 

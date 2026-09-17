@@ -22,6 +22,7 @@ module Nightmare::Harness
     property max_iterations : Int32
     property format_retries : Int32
     property overflow_retries : Int32
+    property failures_dir : String
     property turn_presenter : UI::TurnPresenter? = nil
 
     def initialize(
@@ -32,7 +33,8 @@ module Nightmare::Harness
       @transcript : Transcript? = nil,
       @max_iterations : Int32 = Config::MAX_ITERATIONS,
       @format_retries : Int32 = Config::FORMAT_RETRIES,
-      @overflow_retries : Int32 = Config::CONTEXT_OVERFLOW_RETRIES
+      @overflow_retries : Int32 = Config::CONTEXT_OVERFLOW_RETRIES,
+      @failures_dir : String = File.join(Dir.current, ".nightmare", "failures")
     )
     end
 
@@ -154,6 +156,14 @@ module Nightmare::Harness
           end
 
           return process_step_result(result, store)
+        rescue ex : LoopCircuitBreakerException
+          return handle_loop_circuit_breaker(
+            store: store,
+            tool_name: ex.tool_name,
+            args_json: ex.args_json,
+            msg: ex.message || "ERR_DEGENERATE_LOOP",
+            iterations: 0
+          )
         rescue ex : CancelledException
           # User cancelled turn cooperatively (T12)
           rolled_back = store.rollback_turn
@@ -190,6 +200,21 @@ module Nightmare::Harness
       result : Mantle::StepResult(String, Mantle::StepError),
       store : Context::SlidingStore
     ) : TurnOutcome
+      if @tool_loop.loop_detector.tripped? || (result.error == Mantle::StepError::ToolExecutionFailure && result.error_message.try(&.includes?("ERR_DEGENERATE_LOOP")))
+        tool_name = @tool_loop.loop_detector.tripped_tool || "unknown"
+        args_json = @tool_loop.loop_detector.tripped_args || ""
+        msg = @tool_loop.loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP: identical tool call repeated"
+        return handle_loop_circuit_breaker(
+          store: store,
+          tool_name: tool_name,
+          args_json: args_json,
+          msg: msg,
+          thinking: result.thinking,
+          iterations: result.iterations,
+          prompt_tokens: result.raw_response.try(&.prompt_eval_count)
+        )
+      end
+
       if result.ok?
         text = result.value.not_nil!
 
@@ -303,6 +328,78 @@ module Nightmare::Harness
         hardmax: hardmax,
         calibrator: @tool_loop.calibrator
       )
+    end
+
+    private def handle_loop_circuit_breaker(
+      store : Context::SlidingStore,
+      tool_name : String,
+      args_json : String,
+      msg : String,
+      thinking : String? = nil,
+      iterations : Int32 = 0,
+      prompt_tokens : Int32? = nil
+    ) : TurnOutcome
+      dump_failure_report(store, tool_name, args_json, msg, iterations, prompt_tokens)
+
+      TurnOutcome.failure(
+        StepError.new(StepErrorKind::DegenerateLoopCircuitBreaker, msg, retryable: false),
+        thinking: thinking,
+        iterations: iterations,
+        prompt_tokens: prompt_tokens
+      )
+    end
+
+    private def dump_failure_report(
+      store : Context::SlidingStore,
+      tool_name : String,
+      args_json : String,
+      msg : String,
+      iterations : Int32,
+      prompt_tokens : Int32?
+    ) : Nil
+      begin
+        Dir.mkdir_p(@failures_dir)
+        now = Time.utc
+        timestamp_slug = now.to_s("%Y%m%d_%H%M%S_%L")
+        seq_id = Random::Secure.hex(4)
+        filename = "failure_#{timestamp_slug}_#{seq_id}.json"
+        path = File.join(@failures_dir, filename)
+
+        active = store.active_turn
+        history_msgs = active.try(&.messages) || [] of Mantle::Message
+        serialized_messages = history_msgs.map do |m|
+          {
+            "role" => m.role,
+            "content" => m.content,
+            "tool_calls" => m.tool_calls.try(&.map { |tc| {"id" => tc.id, "name" => tc.function.name, "arguments" => tc.function.arguments} })
+          }
+        end
+
+        parsed_args = begin
+          JSON.parse(args_json)
+        rescue
+          JSON::Any.new(args_json)
+        end
+
+        report = {
+          "timestamp" => now.to_rfc3339,
+          "error_code" => "ERR_DEGENERATE_LOOP",
+          "message" => msg,
+          "offending_tool" => tool_name,
+          "arguments" => parsed_args,
+          "messages" => serialized_messages,
+          "token_metrics" => {
+            "iterations" => iterations,
+            "prompt_tokens" => prompt_tokens,
+            "cumulative_spend" => @tool_loop.cumulative_spend,
+            "spend_cap" => @tool_loop.spend_cap
+          }
+        }
+
+        File.write(path, report.to_pretty_json)
+      rescue
+        # Failure dump must not crash the shutdown sequence
+      end
     end
   end
 end

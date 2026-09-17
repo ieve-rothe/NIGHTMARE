@@ -4,6 +4,7 @@
 
 require "mantle"
 require "../harness/loop_detector"
+require "../harness/tool_loop"
 require "../ui/turn_presenter"
 
 module Nightmare::Tools
@@ -12,7 +13,7 @@ module Nightmare::Tools
 end
 
 module ToolMiddleware
-  # Loop detector middleware short-circuits repeated tool calls with a refusal message
+  # Loop detector middleware acts as a hard circuit breaker, raising LoopCircuitBreakerException on repeat breach
   class LoopDetector < Base
     getter detector : Nightmare::Harness::LoopDetector
 
@@ -26,7 +27,7 @@ module ToolMiddleware
     ) : String
       refused, msg = @detector.check(tool_name, args.to_json)
       if refused
-        msg.not_nil!
+        raise Nightmare::Harness::LoopCircuitBreakerException.new(msg.not_nil!, tool_name, args.to_json)
       else
         next_handler.call(args)
       end

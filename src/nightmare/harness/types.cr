@@ -15,6 +15,7 @@ module Nightmare::Harness
     Cancelled              # user interrupt; a first-class outcome, not a failure
     ContextOverflow        # provider rejected request for length
     SpendCapExceeded       # per-turn token/cost cap hit (§7)
+    DegenerateLoopCircuitBreaker # repeated identical tool calls breached threshold (circuit breaker)
   end
 
   record StepError,

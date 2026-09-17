@@ -19,7 +19,7 @@ describe "Nightmare Harness & Step Runner" do
       refused3, msg = detector.check(tool_name, args)
       refused3.should be_true
       msg.should_not be_nil
-      msg.not_nil!.should contain("[Refused: identical call repeated 3 times. Change approach or ask the user.]")
+      msg.not_nil!.should contain("ERR_DEGENERATE_LOOP: identical call to read_file repeated 3 times. Halting execution.")
     end
   end
 
