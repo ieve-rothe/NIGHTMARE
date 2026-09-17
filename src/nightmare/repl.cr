@@ -24,6 +24,7 @@ require "./ui/approval"
 require "./ui/stream_controller"
 require "./ui/turn_presenter"
 require "./ui/cancellation"
+require "./ui/editor"
 require "./commands/router"
 
 module Nightmare

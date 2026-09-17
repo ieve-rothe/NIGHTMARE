@@ -1,4 +1,5 @@
 require "../workspace/environment"
+require "../ui/editor"
 
 module Nightmare::SystemPrompt
   enum Source
@@ -66,18 +67,6 @@ module Nightmare::SystemPrompt
 
     def initialize(@text : String, @source : Source, @path : String? = nil)
     end
-
-    def to_tuple : Tuple(String, Source)
-      {@text, @source}
-    end
-
-    def [](index : Int32) : String | Source
-      case index
-      when 0 then @text
-      when 1 then @source
-      else raise IndexError.new("Index #{index} out of bounds for ResolutionResult")
-      end
-    end
   end
 
   class Resolver
@@ -102,42 +91,17 @@ module Nightmare::SystemPrompt
         )
       end
 
-      # Tier 2: Repository Committed Override (.nightmare/prompt.md)
-      repo_prompt = repo_prompt_path(env)
-      if File.file?(repo_prompt)
-        content = File.read(repo_prompt)
-        unless content.strip.empty?
-          return ResolutionResult.new(
-            text: content.strip,
-            source: Source::RepoOverride,
-            path: repo_prompt
-          )
-        end
-      end
+      # Candidates for Tiers 2-4 table-driven cascade
+      candidates = [
+        {Source::RepoOverride, env.repo_prompt_path},
+        {Source::WorkspaceConfig, env.workspace_prompt_path},
+        {Source::GlobalConfig, env.global_prompt_path},
+      ]
 
-      # Tier 3: Workspace Central Config ($XDG_CONFIG_HOME/nightmare/workspaces/<id>/prompt.md)
-      ws_prompt = workspace_prompt_path(env)
-      if File.file?(ws_prompt)
-        content = File.read(ws_prompt)
-        unless content.strip.empty?
-          return ResolutionResult.new(
-            text: content.strip,
-            source: Source::WorkspaceConfig,
-            path: ws_prompt
-          )
-        end
-      end
-
-      # Tier 4: Global Central Config ($XDG_CONFIG_HOME/nightmare/prompt.md)
-      glob_prompt = global_prompt_path(env)
-      if File.file?(glob_prompt)
-        content = File.read(glob_prompt)
-        unless content.strip.empty?
-          return ResolutionResult.new(
-            text: content.strip,
-            source: Source::GlobalConfig,
-            path: glob_prompt
-          )
+      candidates.each do |source, path|
+        if File.file?(path)
+          content = File.read(path).strip
+          return ResolutionResult.new(text: content, source: source, path: path) unless content.empty?
         end
       end
 
@@ -215,53 +179,20 @@ module Nightmare::SystemPrompt
       io_out : IO = STDOUT,
       io_err : IO = STDERR
     ) : Bool
-      editor = resolve_editor(editor_override)
-      unless editor
-        io_err.puts "Error: No editor found in $EDITOR, $VISUAL, or PATH (nano, vim, vi)."
-        return false
-      end
-
-      tempfile = File.tempfile("nightmare_prompt_", ".md")
-      temp_path = tempfile.path
-
-      begin
-        tempfile.puts(@current_text)
-        tempfile.flush
-        tempfile.close
-
-        cmd = "#{editor} #{Process.quote(temp_path)}"
-        status = Process.run(
-          command: "/bin/sh",
-          args: ["-c", cmd],
-          input: io_in,
-          output: io_out,
-          error: io_err
-        )
-
-        if status.success?
-          unless File.exists?(temp_path)
-            io_err.puts "Warning: Edited temporary file was removed. Retaining previous system prompt."
-            return false
-          end
-
-          edited_content = File.read(temp_path).strip
-          if edited_content.empty?
-            io_err.puts "Warning: Edited system prompt was empty. Retaining previous system prompt."
-            return false
-          end
-
-          @current_text = edited_content
-          true
-        else
-          status_desc = status.normal_exit? ? status.exit_code.to_s : "signal #{status.exit_signal? || "UNKNOWN"}"
-          io_err.puts "Notice: Editor exited with non-zero status (#{status_desc}). In-memory system prompt unchanged."
-          false
-        end
-      rescue ex : Exception
-        io_err.puts "Warning: Error during editor execution: #{ex.message}. In-memory system prompt unchanged."
+      if edited = UI::Editor.edit(
+        initial_text: @current_text,
+        editor_override: editor_override,
+        io_in: io_in,
+        io_out: io_out,
+        io_err: io_err,
+        tempfile_prefix: "nightmare_prompt_",
+        tempfile_suffix: ".md",
+        subject: "system prompt"
+      )
+        @current_text = edited
+        true
+      else
         false
-      ensure
-        File.delete(temp_path) if File.exists?(temp_path)
       end
     end
 
@@ -270,23 +201,7 @@ module Nightmare::SystemPrompt
     end
 
     def resolve_editor(override : String? = nil) : String?
-      return override if override && !override.strip.empty?
-
-      if env_editor = ENV["EDITOR"]?
-        return env_editor unless env_editor.strip.empty?
-      end
-
-      if env_visual = ENV["VISUAL"]?
-        return env_visual unless env_visual.strip.empty?
-      end
-
-      ["nano", "vim", "vi"].each do |candidate|
-        if path = Process.find_executable(candidate)
-          return path
-        end
-      end
-
-      nil
+      UI::Editor.resolve_editor(override)
     end
   end
 
