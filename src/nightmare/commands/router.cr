@@ -11,6 +11,7 @@ require "../workspace/environment"
 require "../plan"
 require "../harness/subagent_runner"
 require "../config"
+require "../skills"
 require "colorize"
 
 module Nightmare::Commands
@@ -20,6 +21,7 @@ module Nightmare::Commands
     getter calibrator : Context::TokenCalibrator
     getter guard : Tools::Guard
     getter env : Workspace::Environment
+    getter skills_manager : Skills::SkillManager
     property transcript : Transcript
     property current_prompt : String
     property current_model : String
@@ -46,8 +48,10 @@ module Nightmare::Commands
       @client : Mantle::Clients::Client? = nil,
       @pacer : Nightmare::Plan::Pacer = Nightmare::Plan::Pacer.new,
       @stdin : IO = STDIN,
-      @stdout : IO = STDOUT
+      @stdout : IO = STDOUT,
+      skills_manager : Skills::SkillManager? = nil
     )
+      @skills_manager = skills_manager || Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
     end
 
     # Checks if an input line is a slash command or multiline trigger
@@ -122,6 +126,9 @@ module Nightmare::Commands
       when "/theme"
         handle_theme(args)
         {true, nil}
+      when "/skill"
+        handle_skill(args)
+        {true, nil}
       when "/exit", "/quit"
         exit(0)
       else
@@ -131,8 +138,16 @@ module Nightmare::Commands
     end
 
     private def clear_screen : Nil
-      print "\e[2J\e[H"
-      STDOUT.flush
+      @stdout.print "\e[2J\e[H"
+      @stdout.flush
+    end
+
+    private def puts(obj = "") : Nil
+      @stdout.puts(obj)
+    end
+
+    private def print(obj) : Nil
+      @stdout.print(obj)
     end
 
     private def print_help : Nil
@@ -150,6 +165,7 @@ Available Slash Commands:
   /drop [path]     Unpin a file from context (or /rm)
   /save [path]     Export pristine RAM transcript to Markdown
   /prompt [edit]   View or edit in-memory system prompt
+  /skill [name]    Toggle, switch, or list task skills (/skill off)
   /review          Inspect assembled prompt, pinned files, and token usage
   /thinking        View model internal chain-of-thought from last turn
   /theme [name]    Switch theme (cyberpunk, outrun, phosphor, classic)
@@ -246,8 +262,8 @@ HELP
         else
           puts "Enter new in-memory system prompt (single line or empty to cancel):"
           print "> "
-          STDOUT.flush
-          if input = STDIN.gets.try(&.strip)
+          @stdout.flush
+          if input = @stdin.gets.try(&.strip)
             if !input.empty?
               @current_prompt = input
               puts "Updated in-memory system prompt."
@@ -261,11 +277,66 @@ HELP
       end
     end
 
+    private def handle_skill(args : String) : Nil
+      trimmed = args.strip
+
+      if trimmed.empty?
+        skills = @skills_manager.scan_all
+        if skills.empty?
+          puts "No skills found. Add .md files to #{@env.repo_skills_dir} (local) or #{@env.global_skills_dir} (global)."
+          return
+        end
+
+        active = @skills_manager.active_skill
+        puts "\nAvailable Skills:"
+        skills.each do |s|
+          is_active = active && active.name == s.name
+          marker = is_active ? "●" : "○"
+          tokens = @calibrator.estimate(s.content.size)
+          scope_str = "(#{s.scope})"
+          active_str = is_active ? " [ACTIVE]" : ""
+          override_str = s.overrides_global? ? " [overrides global]" : ""
+
+          puts "  #{marker} #{s.name.ljust(22)} #{scope_str.ljust(9)} ~#{tokens} tok#{active_str}#{override_str}"
+        end
+        puts "\nUsage: /skill <name> to toggle/switch, or /skill off\n"
+        return
+      end
+
+      res = @skills_manager.toggle(trimmed)
+      case res.status
+      when Skills::ToggleStatus::Deactivated
+        if prev = res.previous_skill
+          puts "Deactivated skill '#{prev.name}'. Context cleared."
+        else
+          puts "No active skill to deactivate."
+        end
+      when Skills::ToggleStatus::Switched
+        curr = res.skill.not_nil!
+        prev = res.previous_skill.not_nil!
+        tok = @calibrator.estimate(curr.content.size)
+        puts "Switched skill: '#{prev.name}' ➔ '#{curr.name}' (~#{tok} tokens)."
+      when Skills::ToggleStatus::Activated
+        curr = res.skill.not_nil!
+        tok = @calibrator.estimate(curr.content.size)
+        puts "Activated skill '#{curr.name}' (~#{tok} tokens)."
+      when Skills::ToggleStatus::NotFound
+        puts "No skill found matching '#{trimmed}'. Run /skill to see available skills."
+      end
+    end
+
     private def handle_review : Nil
       puts "\n=== Context Review ==="
       puts "--- System Prompt ---"
       puts @current_prompt
       puts
+
+      skill_block = @skills_manager.active_skill.try(&.formatted_block)
+      if skill = @skills_manager.active_skill
+        puts "--- Active Skill (#{skill.name} [#{skill.scope}]) ---"
+        puts skill.content
+        puts
+      end
 
       if block = @pinned_files.render_pinned_block(@guard)
         puts "--- Pinned Files ---"
@@ -291,12 +362,14 @@ HELP
       end
 
       pinned_tokens = @pinned_files.total_estimated_tokens(@guard, @calibrator)
-      total_tokens = @store.total_estimated_tokens(@calibrator, @current_prompt, block)
+      total_tokens = @store.total_estimated_tokens(@calibrator, @current_prompt, block, skill_block)
       prompt_tokens = @calibrator.estimate(@current_prompt.size)
+      skill_tokens = skill ? @calibrator.estimate(skill_block.try(&.size) || 0) : 0
 
       puts "\n--- Token Budget ---"
       puts "Estimated total tokens: #{total_tokens} / #{@store.hardmax} tokens"
       puts "  System prompt: ~#{prompt_tokens} tokens"
+      puts "  Active skill:  ~#{skill_tokens} tokens" if skill
       puts "  Pinned files:  ~#{pinned_tokens} tokens"
       puts "  Calibrator divisor: #{@calibrator.divisor.round(2)}"
       puts "=====================\n"

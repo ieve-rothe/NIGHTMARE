@@ -45,6 +45,7 @@ module Nightmare::UI
     property agent_thought : String? = nil
     property last_agent_response : String? = nil
     property active_subagent : SubagentTelemetry? = nil
+    property active_skill_name : String? = nil
     property max_response_lines : Int32 = 6
     property turn_number : Int32 = 0
     getter opened_files : Array(OpenedFile) = [] of OpenedFile
@@ -269,6 +270,9 @@ module Nightmare::UI
 
       # 1. Turn Banner & Prompt Card
       turn_title = "#{Theme.title}NIGHTMARE REPL#{Theme::RESET} #{Theme.meta_dim}· TURN #{@turn_number}#{Theme::RESET}"
+      if sname = @active_skill_name
+        turn_title = "#{turn_title} #{Theme.meta_dim}·#{Theme::RESET} #{Theme.status_tag}SKILL:#{sname}#{Theme::RESET}"
+      end
       status_badge = "#{Theme.token_badge}● CARDS COMPRESSED#{Theme::RESET}"
 
       @output.puts panel.render_header(turn_title, status_badge, Theme.border)

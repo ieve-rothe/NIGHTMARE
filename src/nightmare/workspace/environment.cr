@@ -22,6 +22,8 @@ module Nightmare::Workspace
     getter workspace_prompt_path : String
     getter global_prompt_path : String
     getter repo_prompt_path : String
+    getter global_skills_dir : String
+    getter repo_skills_dir : String
     getter manifest : Manifest
     getter settings : Settings
     getter? ensure_dirs : Bool
@@ -70,11 +72,14 @@ module Nightmare::Workspace
       @workspace_prompt_path = File.join(@config_dir, "prompt.md")
       @global_prompt_path = File.join(@global_config_dir, "prompt.md")
       @repo_prompt_path = File.join(@root, ".nightmare", "prompt.md")
+      @global_skills_dir = File.join(@global_config_dir, "skills")
+      @repo_skills_dir = File.join(@root, ".nightmare", "skills")
 
       if ensure_dirs
         Dir.mkdir_p(@config_dir) unless Dir.exists?(@config_dir)
         Dir.mkdir_p(@state_dir) unless Dir.exists?(@state_dir)
         Dir.mkdir_p(@cache_dir) unless Dir.exists?(@cache_dir)
+        Dir.mkdir_p(@global_skills_dir) unless Dir.exists?(@global_skills_dir)
         @manifest = Manifest.load_or_create(@manifest_path, @workspace_id, @root)
       else
         @manifest = Manifest.new(id: @workspace_id, canonical_path: @root)

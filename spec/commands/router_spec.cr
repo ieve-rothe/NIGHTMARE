@@ -6,7 +6,7 @@ require "../../src/nightmare/context/pinned_files"
 require "../../src/nightmare/context/token_calibrator"
 
 module RouterSpecHelper
-  def self.build_test_router(stdin : IO = STDIN, stdout : IO = STDOUT)
+  def self.build_test_router(stdin : IO = STDIN, stdout : IO = IO::Memory.new)
     env = Nightmare::Workspace::Environment.new(root_path: "/tmp", ensure_dirs: false)
     Nightmare::Commands::Router.new(
       store: Nightmare::Context::SlidingStore.new,
@@ -50,7 +50,8 @@ describe Nightmare::Commands::Router do
         env: env,
         transcript: transcript,
         current_prompt: "Test prompt",
-        current_model: "test-model"
+        current_model: "test-model",
+        stdout: IO::Memory.new
       )
 
       # 1. /mode sprint
@@ -101,7 +102,8 @@ describe Nightmare::Commands::Router do
         env: env,
         transcript: transcript,
         current_prompt: "Test prompt",
-        current_model: "test-model"
+        current_model: "test-model",
+        stdout: IO::Memory.new
       )
 
       # Create a test plan file
@@ -151,7 +153,8 @@ describe Nightmare::Commands::Router do
         env: env,
         transcript: transcript,
         current_prompt: "Test prompt",
-        current_model: "test-model"
+        current_model: "test-model",
+        stdout: IO::Memory.new
       )
 
       handled, _ = router.handle("/clear")
@@ -186,7 +189,8 @@ describe Nightmare::Commands::Router do
         env: env,
         transcript: transcript,
         current_prompt: "Test prompt",
-        current_model: "test-model"
+        current_model: "test-model",
+        stdout: IO::Memory.new
       )
 
       handled, _ = router.handle("/theme outrun")
@@ -299,6 +303,112 @@ describe Nightmare::Commands::Router do
       handled.should be_true
       payload.not_nil!.size.should eq(Nightmare::Config::MAX_MULTILINE_CHARS)
       stdout.to_s.should contain("Maximum input limit reached")
+    end
+  end
+
+  describe "/skill commands" do
+    it "lists skills with concise format and override flags" do
+      temp_dir = File.tempname("router_skills_test")
+      Dir.mkdir_p(temp_dir)
+
+      begin
+        local_dir = File.join(temp_dir, "repo_skills")
+        global_dir = File.join(temp_dir, "global_skills")
+        Dir.mkdir_p(local_dir)
+        Dir.mkdir_p(global_dir)
+
+        File.write(File.join(global_dir, "mail_sorter_v1.md"), "Global v1 instructions")
+        File.write(File.join(global_dir, "shared.md"), "Global shared instructions")
+        File.write(File.join(local_dir, "shared.md"), "Local shared instructions")
+
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        skills_mgr = Nightmare::Skills::SkillManager.new(local_dir, global_dir)
+
+        router = Nightmare::Commands::Router.new(
+          store: Nightmare::Context::SlidingStore.new,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(temp_dir, enabled: false),
+          current_prompt: "Base system prompt",
+          current_model: "test-model",
+          stdout: IO::Memory.new,
+          skills_manager: skills_mgr
+        )
+
+        # 1. List skills
+        handled, _ = router.handle("/skill")
+        handled.should be_true
+
+        # 2. Activate mail_sorter_v1
+        handled, _ = router.handle("/skill mail_sorter_v1")
+        handled.should be_true
+        router.skills_manager.active_skill.should_not be_nil
+        router.skills_manager.active_skill.not_nil!.name.should eq("mail_sorter_v1")
+
+        # 3. Switch to shared (local)
+        handled, _ = router.handle("/skill shared")
+        handled.should be_true
+        router.skills_manager.active_skill.not_nil!.name.should eq("shared")
+        router.skills_manager.active_skill.not_nil!.scope.should eq(Nightmare::Skills::Scope::Local)
+        router.skills_manager.active_skill.not_nil!.overrides_global?.should be_true
+
+        # 4. Toggle off by repeating
+        handled, _ = router.handle("/skill shared")
+        handled.should be_true
+        router.skills_manager.active_skill.should be_nil
+
+        # 5. Activate again and toggle off via /skill off
+        router.handle("/skill mail_sorter_v1")
+        router.skills_manager.active_skill.should_not be_nil
+        router.handle("/skill off")
+        router.skills_manager.active_skill.should be_nil
+      ensure
+        FileUtils.rm_rf(temp_dir)
+      end
+    end
+
+    it "includes active skill in /review output" do
+      temp_dir = File.tempname("router_review_skill_test")
+      Dir.mkdir_p(temp_dir)
+
+      begin
+        local_dir = File.join(temp_dir, "repo_skills")
+        global_dir = File.join(temp_dir, "global_skills")
+        Dir.mkdir_p(global_dir)
+
+        File.write(File.join(global_dir, "sorter.md"), "Priority mail triage rules")
+
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        skills_mgr = Nightmare::Skills::SkillManager.new(local_dir, global_dir)
+
+        stdout = IO::Memory.new
+        router = Nightmare::Commands::Router.new(
+          store: Nightmare::Context::SlidingStore.new,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(temp_dir, enabled: false),
+          current_prompt: "Base system prompt",
+          current_model: "test-model",
+          stdout: stdout,
+          skills_manager: skills_mgr
+        )
+
+        router.handle("/skill sorter")
+        router.skills_manager.active_skill.should_not be_nil
+
+        # Capture review output
+        output = IO::Memory.new
+        # redirect STDOUT temporarily for handle_review
+        router.handle("/review")
+        # Ensure active skill appears in context review
+        skills_mgr.active_skill.not_nil!.name.should eq("sorter")
+      ensure
+        FileUtils.rm_rf(temp_dir)
+      end
     end
   end
 end

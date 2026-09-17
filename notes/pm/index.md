@@ -8,7 +8,7 @@ This file tracks the status and priority of all development tickets for the `nig
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | [TKT-002](notes/pm/TKT-002-kv-cache-utilization-metrics.md) | KV Cache Capacity and Utilization Metrics (Tokens and Memory) | Observability & Resource Management | Open | Med | 2026-09-11 |
 | [TKT-004](notes/pm/TKT-004-subagent-plan-orchestration.md) | Programmatic Plan Orchestration with Deterministic Gates and Subagent Execution | Autonomous Workflows & Subagents | Resolved | High | 2026-09-12 |
-| [TKT-005](notes/pm/TKT-005-integration-testing-restructure-and-core-workflows.md) | Restructure Integration Testing Suite and Implement Human-Readable Core Workflows | Testing & Verification Architecture | Open | High | 2026-09-17 |
+| [TKT-005](notes/pm/TKT-005-integration-testing-restructure-and-core-workflows.md) | Restructure Integration Testing Suite and Implement Human-Readable Core Workflows | Testing & Verification Architecture | In-Progress | High | 2026-09-17 |
 
 ## Closed Tickets
 

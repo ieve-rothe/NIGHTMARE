@@ -26,6 +26,7 @@ require "./ui/turn_presenter"
 require "./ui/cancellation"
 require "./ui/editor"
 require "./commands/router"
+require "./skills"
 
 module Nightmare
   class REPL
@@ -44,6 +45,7 @@ module Nightmare
     getter turn_presenter : UI::TurnPresenter
     getter cancellation : UI::Cancellation
     getter router : Commands::Router
+    getter skills_manager : Skills::SkillManager
     getter model_name : String
     getter? no_log : Bool
     getter? markdown_formatting : Bool
@@ -169,6 +171,7 @@ module Nightmare
 
       @stream_ctrl = UI::StreamController.new
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
+      @skills_manager = Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
       on_model = ->(new_model : String) {
         @model_name = new_model
         raw_client.model_name = new_model
@@ -183,7 +186,8 @@ module Nightmare
         current_prompt: prompt,
         current_model: @model_name,
         on_model_change: on_model,
-        client: client
+        client: client,
+        skills_manager: @skills_manager
       )
     end
 
@@ -192,7 +196,12 @@ module Nightmare
       STDOUT.flush
 
       loop do
-        print "#{Salamander::UI::Theme.prompt_glyph}#{Salamander::UI::Theme.user_prompt}"
+        glyph = if active_skill = @skills_manager.active_skill
+          "#{Salamander::UI::Theme.status_tag}[#{active_skill.name}]#{Salamander::UI::Theme::RESET} #{Salamander::UI::Theme.prompt_glyph}"
+        else
+          Salamander::UI::Theme.prompt_glyph.to_s
+        end
+        print "#{glyph}#{Salamander::UI::Theme.user_prompt}"
         STDOUT.flush
 
         line = STDIN.gets
@@ -242,10 +251,12 @@ module Nightmare
       # Start turn in context store
       prev_resp = @store.history.last?.try(&.last_assistant_text)
       @turn_presenter.reset_for_new_turn(active_input, prev_resp)
+      @turn_presenter.active_skill_name = @skills_manager.active_skill.try(&.name)
       user_msg = Mantle::Message.new("user", active_input)
       @store.start_turn(user_msg)
 
       pinned_block = @pinned_files.render_pinned_block(@guard)
+      skill_block = @skills_manager.active_skill.try(&.formatted_block)
       start_time = Time.instant
 
       turn_sequence_id = UUID.random.to_s
@@ -253,7 +264,8 @@ module Nightmare
         @step_runner.run_turn(
           store: @store,
           system_prompt: @router.current_prompt,
-          pinned_block: pinned_block
+          pinned_block: pinned_block,
+          skill_block: skill_block
         ) do |chunk|
           @stream_ctrl.process_chunk(chunk)
         end
@@ -287,7 +299,7 @@ module Nightmare
 
         # Calibrate tokens
         if prompt_tok = outcome.prompt_tokens
-          assembled = @store.assemble_messages(@router.current_prompt, pinned_block)
+          assembled = @store.assemble_messages(@router.current_prompt, pinned_block, skill_block)
           total_chars = assembled.sum { |m| m.content.try(&.size) || 0 }
           @calibrator.calibrate!(total_chars, prompt_tok)
           @calibrator.save(@env.workspace_cache_dir) if @env.ensure_dirs? && !@no_log

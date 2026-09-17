@@ -1,7 +1,7 @@
 ---
 ID: TKT-005
 Title: Restructure Integration Testing Suite and Implement Human-Readable Core Workflows
-Status: Open
+Status: In-Progress
 Priority: High
 ---
 
@@ -130,7 +130,21 @@ The following 11 developer scenarios represent the authoritative integration con
    - Progressively implement Workflows 3 through 11 as the major refactor proceeds.
 
 ### 3.2 Verification Evidence
-*(To be populated as phases complete)*
+- **Phase 1 Complete (Commit `2c64d0f`)**:
+  - `legacy_e2e/`: Quarantined all 122 legacy specs (`tier1_feature_spec.cr`, `tier2_boundary_spec.cr`, `tier3_combination_spec.cr`, `tier4_workload_spec.cr`, `test_runner_spec.cr`, `test_runner.cr`).
+  - `spec/e2e/`: Completely removed from active spec tree.
+  - `spec/support/integration_harness.cr`: Extracted reusable `WorkspaceSandbox`, `MockLlmServer`, and `ProcessSession` with strict failure reporting (eliminated silent `pending!` escape hatch).
+  - `spec/integration/workflows_spec.cr`: Implemented Workflow 1 (Survey & Zero-Litter) and Workflow 2 (Mutation with Unified Diff Modal - approve and reject branches) with real assertions.
+  - Test Execution Verification:
+    ```bash
+    $ crystal spec spec/integration/workflows_spec.cr
+    Finished in 133.26 milliseconds
+    3 examples, 0 failures, 0 errors, 0 pending
+
+    $ crystal spec
+    Finished in 1.86 seconds
+    204 examples, 0 failures, 0 errors, 0 pending
+    ```
 
 ### 3.3 Validation Plan
 - Developer confirms the test suite runs quickly and predictably during local refactoring.
@@ -138,11 +152,39 @@ The following 11 developer scenarios represent the authoritative integration con
 
 ---
 
+## 4. Remaining Open Work Items
+
+### Phase 1: Quarantine & Foundation (Complete)
+- [x] Quarantine legacy E2E suite to `legacy_e2e/` and eliminate `spec/e2e/`
+- [x] Extract clean integration harness to `spec/support/integration_harness.cr` with loud failure reporting
+- [x] Implement Workflow 1: Codebase Survey & Zero Repository Litter in `spec/integration/workflows_spec.cr`
+- [x] Implement Workflow 2: File Mutation with Unified Diff Approval Modal (`[y]` and `[N]`)
+
+### Phase 2: Core REPL & Execution Workflows (Open)
+- [ ] Implement Workflow 3: Shell Execution, Allowlisting & Metacharacter Anti-Injection Boundary
+- [ ] Implement Workflow 4: Hard Subprocess Timeout & Process Group Reap (kill runaway PGID, no zombie grandchildren)
+- [ ] Implement Workflow 5: Pinned Working Set & Live Disk Re-Read (`/add` short-circuiting & prompt re-assembly on disk change)
+- [ ] Implement Workflow 6: Interactive Turn Interruption & Context Rollback on `Ctrl+C` (`Signal::INT` clean abort)
+
+### Phase 3: Advanced Subsystem Workflows (Open)
+- [ ] Implement Workflow 7: In-Turn Context Shedding vs. Pristine Transcript Export (`/save` exports un-truncated RAM transcript)
+- [ ] Implement Workflow 8: System Prompt Precedence Hierarchy (CLI flag > repo override > workspace config > global config > default persona)
+- [ ] Implement Workflow 9: Tool Call Loop Detection & Breaker (interception after 3 identical calls)
+- [ ] Implement Workflow 10: Multi-Line Paste & Input Handling (`/paste` and triple-quote blocks)
+- [ ] Implement Workflow 11: Ghost Mode & Anti-Exfiltration Guarantee (`--no-logs` zero-disk-footprint validation)
+
+### Phase 4: CI & Final Hardening (Open)
+- [ ] Add integration suite target to project CI script / workflow
+- [ ] Benchmark full test suite execution time under continuous refactoring (<5s goal)
+
+---
+
 ## Open Questions & Concurrency Concerns
-- **Subprocess Timing**: `ProcessSession` in `spec/support/` must use bounded poll intervals (25ms) and default 2-second timeouts to keep integration tests fast while preventing flakiness on CI.
+- **Subprocess Timing**: `ProcessSession` in `spec/support/` must use bounded poll intervals (10-25ms) and default 2-second timeouts to keep integration tests fast while preventing flakiness on CI.
 - **PTY vs Pipes**: `ProcessSession` uses piped IO. Terminal-specific escape sequences (like ANSI cursor positioning) should be tested via unit tests on `Salamander::Terminal` rather than brittle pipe scraping in E2E.
 
 ---
 
-## 4. Revision History
+## 5. Revision History
 * 2026-09-17: Created ticket capturing problem analysis, skeptic audit findings, quarantine strategy, and full specification for the 11 core human-readable workflows.
+* 2026-09-17: Phase 1 completed (quarantine legacy suite, extract harness, seed Workflows 1 & 2, verified full suite passing in 1.86s). Status set to `In-Progress`. Added Remaining Open Work Items checklist.

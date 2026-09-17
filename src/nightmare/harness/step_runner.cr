@@ -42,10 +42,11 @@ module Nightmare::Harness
       store : Context::SlidingStore,
       system_prompt : String? = nil,
       pinned_block : String? = nil,
+      skill_block : String? = nil,
       &stream_callback : String -> Nil
     ) : TurnOutcome
       @retrier.execute do
-        run_turn_attempt(store, system_prompt, pinned_block, &stream_callback)
+        run_turn_attempt(store, system_prompt, pinned_block, skill_block, &stream_callback)
       end
     end
 
@@ -53,9 +54,10 @@ module Nightmare::Harness
     def run_turn(
       store : Context::SlidingStore,
       system_prompt : String? = nil,
-      pinned_block : String? = nil
+      pinned_block : String? = nil,
+      skill_block : String? = nil
     ) : TurnOutcome
-      run_turn(store, system_prompt, pinned_block) { |_| }
+      run_turn(store, system_prompt, pinned_block, skill_block) { |_| }
     end
 
     # Runs a single turn attempt against the provided SlidingStore
@@ -63,6 +65,7 @@ module Nightmare::Harness
       store : Context::SlidingStore,
       system_prompt : String?,
       pinned_block : String?,
+      skill_block : String? = nil,
       &stream_callback : String -> Nil
     ) : TurnOutcome
       @tool_loop.reset_turn
@@ -95,7 +98,7 @@ module Nightmare::Harness
       }
 
       loop do
-        messages = store.assemble_messages(system_prompt, pinned_block)
+        messages = store.assemble_messages(system_prompt, pinned_block, skill_block)
 
         on_iter = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
           if last_res

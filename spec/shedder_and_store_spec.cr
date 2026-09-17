@@ -181,5 +181,30 @@ describe "Shedder and SlidingStore Context Engine" do
       msgs[3].role.should eq("user")
       msgs[3].content.should eq("Q2")
     end
+
+    it "assembles wire format in strict order: system prompt -> active skill -> pinned files -> history -> active" do
+      store = Nightmare::Context::SlidingStore.new
+
+      h1 = store.start_turn("Q1")
+      h1.append_assistant(Mantle::Message.new("assistant", "A1"))
+      store.commit_turn
+
+      store.start_turn("Q2")
+
+      msgs = store.assemble_messages(
+        system_prompt: "Harness System Prompt",
+        pinned_block: "=== PINNED FILE: code.cr ===",
+        skill_block: "=== ACTIVE SKILL: mail_sorter_v2 (global) ==="
+      )
+
+      msgs[0].role.should eq("system")
+      content = msgs[0].content.not_nil!
+      prompt_idx = content.index("Harness System Prompt").not_nil!
+      skill_idx = content.index("=== ACTIVE SKILL: mail_sorter_v2 (global) ===").not_nil!
+      pinned_idx = content.index("=== PINNED FILE: code.cr ===").not_nil!
+
+      (prompt_idx < skill_idx).should be_true
+      (skill_idx < pinned_idx).should be_true
+    end
   end
 end

@@ -80,21 +80,20 @@ module Nightmare::Context
 
     # Assembles wire-format messages in strict order:
     # 1. System prompt
-    # 2. Pinned files block
-    # 3. Completed historical turns splatted in order
-    # 4. Active in-flight turn messages
-    def assemble_messages(system_prompt : String? = nil, pinned_block : String? = nil) : Array(Mantle::Message)
+    # 2. Active skill block
+    # 3. Pinned files block
+    # 4. Completed historical turns splatted in order
+    # 5. Active in-flight turn messages
+    def assemble_messages(system_prompt : String? = nil, pinned_block : String? = nil, skill_block : String? = nil) : Array(Mantle::Message)
       result = [] of Mantle::Message
 
-      has_prompt = system_prompt && !system_prompt.empty?
-      has_pinned = pinned_block && !pinned_block.empty?
+      system_parts = [] of String
+      system_parts << system_prompt if system_prompt && !system_prompt.empty?
+      system_parts << skill_block if skill_block && !skill_block.empty?
+      system_parts << pinned_block if pinned_block && !pinned_block.empty?
 
-      if has_prompt && has_pinned
-        result << Mantle::Message.new("system", "#{system_prompt}\n\n#{pinned_block}")
-      elsif has_prompt
-        result << Mantle::Message.new("system", system_prompt)
-      elsif has_pinned
-        result << Mantle::Message.new("system", pinned_block)
+      unless system_parts.empty?
+        result << Mantle::Message.new("system", system_parts.join("\n\n"))
       end
 
       @history.each do |turn|
@@ -109,14 +108,14 @@ module Nightmare::Context
     end
 
     # Calculates total characters across all assembled messages
-    def total_characters(system_prompt : String? = nil, pinned_block : String? = nil) : Int32
-      msgs = assemble_messages(system_prompt, pinned_block)
+    def total_characters(system_prompt : String? = nil, pinned_block : String? = nil, skill_block : String? = nil) : Int32
+      msgs = assemble_messages(system_prompt, pinned_block, skill_block)
       msgs.sum { |m| (m.content || "").size }
     end
 
     # Estimates total tokens across all assembled messages using the calibrator
-    def total_estimated_tokens(calibrator : TokenEstimator, system_prompt : String? = nil, pinned_block : String? = nil) : Int32
-      calibrator.estimate(total_characters(system_prompt, pinned_block))
+    def total_estimated_tokens(calibrator : TokenEstimator, system_prompt : String? = nil, pinned_block : String? = nil, skill_block : String? = nil) : Int32
+      calibrator.estimate(total_characters(system_prompt, pinned_block, skill_block))
     end
 
     # Asserts that all history turns and active turn (if any) satisfy pair integrity
