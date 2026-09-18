@@ -74,17 +74,17 @@ module Nightmare::UI
       end
     end
 
-    # Splits a compound shell command string on bash separators (&&, ||, ;, newlines)
+    # Splits a compound shell command string on bash separators (&&, ||, ;, |, newlines)
     # into individual sub-commands, preserving the separator tokens for display.
     # Returns an array of {separator, command} tuples. The first entry has an empty separator.
     private def split_shell_commands(command : String) : Array(Tuple(String, String))
       parts = [] of Tuple(String, String)
-      # Split on &&, ||, ;, or literal \n while preserving delimiters
-      segments = command.split(/(\s*(?:&&|\|\||;)\s*|\n)/)
+      # Split on &&, ||, ;, |, or literal \n while preserving delimiters
+      segments = command.split(/(\s*(?:&&|\|\||;|\|)\s*|\n)/)
       current_sep = ""
       segments.each do |seg|
         stripped = seg.strip
-        if stripped == "&&" || stripped == "||" || stripped == ";"
+        if stripped == "&&" || stripped == "||" || stripped == ";" || stripped == "|"
           current_sep = stripped
         elsif seg == "\n"
           current_sep = "↵"
@@ -179,7 +179,7 @@ module Nightmare::UI
       @output.puts panel.render_row("Cwd:     #{Salamander::UI::Theme.filename}#{@root}#{Salamander::UI::Theme::RESET}", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Timeout: #{timeout_seconds}s", border, Salamander::UI::BoxStyle::Armored)
       if has_metachar
-        note = "Note: Shell metacharacters cannot be saved to allowlist (will run once)".colorize(:yellow).to_s
+        note = "Note: Shell metacharacters cannot be saved as prefix [p]; [a] saves exact command".colorize(:yellow).to_s
         @output.puts panel.render_row(note, border, Salamander::UI::BoxStyle::Armored)
       end
       @output.puts panel.render_divider(border, Salamander::UI::BoxStyle::Armored)
@@ -206,13 +206,10 @@ module Nightmare::UI
           edited = edited_raw ? sanitize_terminal_input(edited_raw) : ""
           return {Tools::ApprovalOutcome::Edit, edited}
         when "a"
-          if has_metachar
-            @output.puts "Notice: Shell metacharacters cannot be saved to allowlist. Running once without saving."
-          end
           return {Tools::ApprovalOutcome::AllSession, nil}
         when "p"
           if has_metachar
-            @output.puts "Notice: Shell metacharacters cannot be saved to allowlist. Running once without saving."
+            @output.puts "Notice: Prefix cannot be saved for compound commands. Running once without saving."
           end
           return {Tools::ApprovalOutcome::PrefixSession, nil}
         when "?", "help"

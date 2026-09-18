@@ -75,7 +75,7 @@ module Nightmare::Tools
 
         has_metachar = Allowlist.contains_metacharacters?(cmd_to_run)
         has_denylisted = Allowlist.has_denylisted_flags?(argv)
-        is_auto = !has_metachar && !has_denylisted && @allowlist.matches?(argv)
+        is_auto = @allowlist.auto_approvable?(cmd_to_run, argv)
 
         unless is_auto
           if handler = @approval_handler
@@ -84,10 +84,8 @@ module Nightmare::Tools
             when ApprovalOutcome::No
               return "[Execution rejected by user]"
             when ApprovalOutcome::AllSession
-              unless has_metachar
-                @allowlist.allow_session_exact(argv)
-                @allowlist.allow_persist_exact(argv)
-              end
+              @allowlist.allow_session_exact(cmd_to_run)
+              @allowlist.allow_persist_exact(cmd_to_run)
             when ApprovalOutcome::PrefixSession
               unless has_metachar
                 @allowlist.allow_session_prefix(argv)

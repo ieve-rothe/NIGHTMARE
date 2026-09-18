@@ -487,7 +487,7 @@ PY
       end
     end
 
-    it "refuses to save metacharacter commands to allowlist on [a] or [p] approval" do
+    it "saves exact compound/pipeline commands to allowlist on [a] approval and auto-approves subsequent identical runs" do
       with_temp_dir do |root|
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
         guard = Nightmare::Tools::Guard.new(env)
@@ -501,14 +501,48 @@ PY
 
         shell = Nightmare::Tools::Shell.new(guard, allowlist, approval_handler: handler)
         cmd = "echo foo | grep foo"
+        res1 = shell.run_command(cmd)
+        res1.should contain("foo")
+        handler_calls.should eq(1)
+
+        # Exact command is saved and auto-approvable
+        allowlist.session_exact.should contain(cmd)
+        allowlist.auto_approvable?(cmd, Nightmare::Tools::Allowlist.tokenize(cmd)).should be_true
+
+        # Second identical invocation runs autonomously without prompting
+        res2 = shell.run_command(cmd)
+        res2.should contain("foo")
+        handler_calls.should eq(1)
+
+        # A variation with different arguments forces approval again
+        diff_cmd = "echo bar | grep foo"
+        shell.run_command(diff_cmd)
+        handler_calls.should eq(2)
+      end
+    end
+
+    it "refuses to save prefix for compound commands on [p] approval" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        handler_calls = 0
+        handler = ->(_cmd : String, _argv : Array(String), _has_meta : Bool, _timeout : Int32) {
+          handler_calls += 1
+          {Nightmare::Tools::ApprovalOutcome::PrefixSession, nil.as(String?)}
+        }
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist, approval_handler: handler)
+        cmd = "echo foo | grep foo"
         shell.run_command(cmd)
 
         handler_calls.should eq(1)
-        # Should not be in allowlist
-        allowlist.session_exact.should be_empty
+        # Prefix is not saved
+        allowlist.session_prefix.should be_empty
         allowlist.auto_approvable?(cmd, Nightmare::Tools::Allowlist.tokenize(cmd)).should be_false
 
-        # Second invocation still forces approval handler
+        # Second invocation still prompts
         shell.run_command(cmd)
         handler_calls.should eq(2)
       end

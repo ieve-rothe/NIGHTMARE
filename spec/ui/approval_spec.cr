@@ -99,6 +99,19 @@ describe Nightmare::UI::Approval do
       out_str.should contain("Timeout: 30s")
     end
 
+    it "renders piped commands with | prefix on separate lines" do
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("y\n"), output: output)
+      outcome, _ = approval.approve_command("cat file.md | head -n 50", ["cat", "file.md", "|", "head", "-n", "50"], true, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
+
+      out_str = output.to_s
+      out_str.should contain("cat")
+      out_str.should contain("file.md")
+      out_str.should contain("|")
+      out_str.should contain("head")
+    end
+
     it "prompts for edit when operator chooses 'e'" do
       input = IO::Memory.new("e\ngit diff\n")
       output = IO::Memory.new

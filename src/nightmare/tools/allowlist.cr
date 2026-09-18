@@ -92,6 +92,11 @@ module Nightmare::Tools
       METACHARACTERS.any? { |ch| command.includes?(ch) }
     end
 
+    # Checks for control or non-printable characters that should never be saved to allowlist
+    def self.has_dangerous_control_characters?(command : String) : Bool
+      command.each_char.any? { |ch| ch == '\0' || ch == '\e' || ch == '\r' || (ch.control? && ch != '\t') }
+    end
+
     # Flag denylist: forces modal confirmation regardless of allowlist state (§4.2)
     # Checks: -c, -e, -E, -C, --exec*, --eval*, --config*, --upload-pack*, --receive-pack*,
     # -exec*, -ok*, attached options (-Cdir, -cCMD), bundled flags (-ec, -ne),
@@ -174,24 +179,43 @@ module Nightmare::Tools
       false
     end
 
+    # Checks if command string or argv matches exact rules
+    def exact_match?(command : String, argv : Array(String)) : Bool
+      raw = command.strip
+      joined = argv.join(" ")
+      @session_exact.includes?(raw) || @persistent_exact.includes?(raw) ||
+        @session_exact.includes?(joined) || @persistent_exact.includes?(joined)
+    end
+
     # Evaluates whether a command is eligible for autonomous execution
     def auto_approvable?(command : String, argv : Array(String)) : Bool
-      return false if self.class.contains_metacharacters?(command)
       return false if self.class.has_denylisted_flags?(argv)
+      return true if exact_match?(command, argv)
+      return false if self.class.contains_metacharacters?(command)
       matches?(argv)
     end
 
     # Records an exact command approval for the active session
+    def allow_session_exact(command : String) : Nil
+      cmd = command.strip
+      return if cmd.empty? || self.class.has_dangerous_control_characters?(cmd)
+      @session_exact.add(cmd)
+    end
+
     def allow_session_exact(argv : Array(String)) : Nil
-      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
-      @session_exact.add(argv.join(" "))
+      allow_session_exact(argv.join(" "))
     end
 
     # Persists an exact command to $XDG_CONFIG_HOME/.../allow
-    def allow_persist_exact(argv : Array(String)) : Nil
-      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
-      @persistent_exact.add(argv.join(" "))
+    def allow_persist_exact(command : String) : Nil
+      cmd = command.strip
+      return if cmd.empty? || self.class.has_dangerous_control_characters?(cmd)
+      @persistent_exact.add(cmd)
       save_persistent
+    end
+
+    def allow_persist_exact(argv : Array(String)) : Nil
+      allow_persist_exact(argv.join(" "))
     end
 
     # Records a prefix approval (argv[0] + argv[1]) for the active session
