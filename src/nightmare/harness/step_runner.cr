@@ -128,6 +128,17 @@ module Nightmare::Harness
         begin
           result = step.run(messages, &wrapped_stream)
 
+          if @tool_loop.cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
+            rolled_back = store.rollback_turn
+            effects = rolled_back.try(&.side_effects) || [] of String
+            @transcript.try &.record_interruption(effects)
+            @tool_loop.cancelled = false
+
+            return TurnOutcome.failure(
+              StepError.new(StepErrorKind::Cancelled, "Interrupted by user", retryable: false)
+            )
+          end
+
           # Check if step error is actually a context length rejection (HTTP 400 / context_length_exceeded)
           if result.err? && context_overflow_error?(result)
             if overflow_retries_remaining > 0

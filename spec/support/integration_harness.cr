@@ -11,7 +11,11 @@ module Nightmare::Integration
   SRC_PATH = File.expand_path("../../src/nightmare.cr", __DIR__)
 
   def self.binary_exists? : Bool
-    File.exists?(BIN_PATH) && File.info(BIN_PATH).modification_time >= File.info(SRC_PATH).modification_time
+    return false unless File.exists?(BIN_PATH)
+    bin_mtime = File.info(BIN_PATH).modification_time
+    Dir.glob(File.expand_path("../../src/**/*.cr", __DIR__)).all? do |file|
+      bin_mtime >= File.info(file).modification_time
+    end
   end
 
   def self.compile_binary! : Bool

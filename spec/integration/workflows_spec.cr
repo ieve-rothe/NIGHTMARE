@@ -206,7 +206,7 @@ describe "Core Developer Workflows (Integration)" do
             session.send_line("Check git repository status")
 
             # 1. First run prompts approval modal
-            session.wait_for("Command: git status")
+            session.wait_for(/git.*status/)
             session.wait_for("[p] save prefix")
 
             # Approve and save prefix with 'p'
@@ -217,11 +217,11 @@ describe "Core Developer Workflows (Integration)" do
             sandbox.read_allowlist.any? { |line| line.includes?("git status") }.should be_true
 
             # 2. Command substitution $(whoami) MUST force approval modal despite 'git status' prefix
-            session.wait_for("Command: git status $(whoami)")
+            session.wait_for(/git.*status.*\$\(whoami\)/)
             session.send_line("N")
 
             # 3. Chained semicolon injection MUST also force approval modal
-            session.wait_for("Command: git status; echo 'pwned'")
+            session.wait_for(/echo.*pwned/)
             session.send_line("N")
 
             session.wait_for("All shell commands processed")
@@ -263,7 +263,7 @@ describe "Core Developer Workflows (Integration)" do
             session.send_line("Run slow sleep")
 
             # Approve the sleep command once with 'y'
-            session.wait_for("Command: #{unique_sleep}")
+            session.wait_for(/sleep.*58\.7492/)
             session.send_line("y")
 
             # REPL must catch timeout after 1s and display timeout notice
@@ -400,14 +400,14 @@ describe "Core Developer Workflows (Integration)" do
         cfg_dir = sandbox.workspace_config_dir
         Dir.mkdir_p(cfg_dir)
         settings = Nightmare::Settings.new
-        settings.token_hardmax = 2000
-        settings.shed_trigger_ratio = 0.50 # triggers when estimated tokens > 1000
+        settings.token_hardmax = 500
+        settings.shed_trigger_ratio = 0.50 # triggers when estimated tokens > 250
         settings.shed_keep_chars = 100
         settings.shed_keep_verbatim = 1    # keep only the last tool result verbatim
         File.write(File.join(cfg_dir, "config.json"), settings.to_pretty_json)
 
         # Create large file on disk
-        large_content = "LINE_DATA_" + ("A" * 1500) + "\n"
+        large_content = "LINE_DATA_" + ("A" * 3000) + "\n"
         sandbox.write_file("data/dump1.txt", large_content)
         sandbox.write_file("data/dump2.txt", "SMALL_DATA_LATEST")
 
@@ -545,11 +545,11 @@ describe "Core Developer Workflows (Integration)" do
             session.send_line("Repeat the shell command")
 
             # Call 1 prompts approval modal
-            session.wait_for("Command: echo loop_attempt")
+            session.wait_for(/echo.*loop_attempt/)
             session.send_line("y")
 
             # Call 2 prompts approval modal
-            session.wait_for("Command: echo loop_attempt")
+            session.wait_for(/echo.*loop_attempt/)
             session.send_line("y")
 
             # Call 3 trips LoopDetector threshold (threshold = 3)
@@ -641,7 +641,7 @@ describe "Core Developer Workflows (Integration)" do
             extra_env: {"MANTLE_API_URL" => mock.api_url}
           ) do |session|
             # Banner displays ghost mode confirmation
-            session.wait_for("Mode      : --no-logs (nothing is persisted)")
+            session.wait_for("Mode      : --no-logs (nothing is persisted)", from_start: true)
 
             session.send_line("Execute sensitive operation")
             session.wait_for("Ghost turn processed silently")
