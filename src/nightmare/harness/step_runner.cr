@@ -34,7 +34,8 @@ module Nightmare::Harness
       @max_iterations : Int32 = Config::MAX_ITERATIONS,
       @format_retries : Int32 = Config::FORMAT_RETRIES,
       @overflow_retries : Int32 = Config::CONTEXT_OVERFLOW_RETRIES,
-      @failures_dir : String = ""
+      @failures_dir : String = "",
+      @no_log : Bool = false
     )
     end
 
@@ -237,7 +238,18 @@ module Nightmare::Harness
 
           # Record remaining assistant/tool messages in transcript before in-turn shedding
           if tr = @transcript
-            active.messages[1..].each { |m| tr.record(m) }
+            active.messages[1..].each do |m|
+              if m.role == "tool"
+                ex = active.exchanges.find { |e| e.call.id == m.tool_call_id }
+                if ex && ex.shed?
+                  tr.record(Mantle::Message.new("tool", ex.original_content, tool_call_id: m.tool_call_id))
+                else
+                  tr.record(m)
+                end
+              else
+                tr.record(m)
+              end
+            end
           end
 
           # Check if turn exceeded shed trigger threshold:
@@ -368,6 +380,7 @@ module Nightmare::Harness
       iterations : Int32,
       prompt_tokens : Int32?
     ) : Nil
+      return if @no_log
       begin
         Dir.mkdir_p(@failures_dir)
         now = Time.utc

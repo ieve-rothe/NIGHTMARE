@@ -167,7 +167,8 @@ module Nightmare
         max_iterations: @env.settings.max_iterations,
         format_retries: @env.settings.format_retries,
         overflow_retries: @env.settings.context_overflow_retries,
-        failures_dir: failures_directory
+        failures_dir: failures_directory,
+        no_log: @no_log
       )
       @step_runner.turn_presenter = @turn_presenter
 

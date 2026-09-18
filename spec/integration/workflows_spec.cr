@@ -403,7 +403,7 @@ describe "Core Developer Workflows (Integration)" do
         settings.token_hardmax = 500
         settings.shed_trigger_ratio = 0.50 # triggers when estimated tokens > 250
         settings.shed_keep_chars = 100
-        settings.shed_keep_verbatim = 1    # keep only the last tool result verbatim
+        settings.shed_keep_verbatim = 0    # shed consumed tool results once threshold is exceeded
         File.write(File.join(cfg_dir, "config.json"), settings.to_pretty_json)
 
         # Create large file on disk
@@ -448,9 +448,13 @@ describe "Core Developer Workflows (Integration)" do
             transcript_content.should contain("A" * 1500)
             transcript_content.should_not contain("[... remaining output shed: was")
 
-            # 2. Wire request sent to LLM for the second step (or final turn) shows shedding happened
+            # 2. Wire request sent to LLM for the subsequent step (request 2) shows shedding happened
             requests = mock.recorded_requests
-            requests.size.should be >= 2
+            requests.size.should be >= 3
+            # Verify that the tool result payload sent over the wire actually contained the shed tombstone
+            step2_body = requests[2][:body]
+            step2_body.should contain("[... remaining output shed: was")
+            step2_body.should_not contain("A" * 1500)
           end
 
           mock.assert_all_consumed!
@@ -570,7 +574,10 @@ describe "Core Developer Workflows (Integration)" do
           failure_files = Dir.children(state_failures)
           failure_files.empty?.should be_false
           dump_json = File.read(File.join(state_failures, failure_files.first))
-          dump_json.should contain("ERR_DEGENERATE_LOOP")
+          dump_data = JSON.parse(dump_json)
+          dump_data["error_code"].as_s.should eq("ERR_DEGENERATE_LOOP")
+          dump_data["offending_tool"].as_s.should eq("run_command")
+          dump_data["arguments"]["command"].as_s.should eq("echo loop_attempt")
         end
       end
     end
@@ -654,17 +661,14 @@ describe "Core Developer Workflows (Integration)" do
         end
 
         # Strict Anti-Exfiltration Guarantees:
-        # 1. No llm_calls.jsonl exists anywhere in workspace state dir
-        log_file = File.join(sandbox.workspace_state_dir, "llm_calls.jsonl")
-        File.exists?(log_file).should be_false
+        # 1. No state directory created under XDG_STATE_HOME/nightmare
+        Dir.exists?(File.join(sandbox.xdg_state, "nightmare")).should be_false
 
-        # 2. No transcript.md exists in state dir
-        transcript_file = File.join(sandbox.workspace_state_dir, "transcript.md")
-        File.exists?(transcript_file).should be_false
+        # 2. No cache directory created under XDG_CACHE_HOME/nightmare
+        Dir.exists?(File.join(sandbox.xdg_cache, "nightmare")).should be_false
 
-        # 3. No token calibrator cache file was persisted
-        calibrator_file = File.join(sandbox.workspace_cache_dir, "calibrator.json")
-        File.exists?(calibrator_file).should be_false
+        # 3. No config directory created under XDG_CONFIG_HOME/nightmare
+        Dir.exists?(File.join(sandbox.xdg_config, "nightmare")).should be_false
 
         # 4. Zero repo litter in target repository
         sandbox.assert_zero_repo_litter!

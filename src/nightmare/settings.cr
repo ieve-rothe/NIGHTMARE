@@ -86,12 +86,19 @@ module Nightmare
     def self.load_or_bootstrap(
       workspace_config_dir : String,
       global_config_dir : String,
+      repo_root : String? = nil,
       ensure_dirs : Bool = true
     ) : Settings
+      repo_config_file = repo_root ? File.join(repo_root, ".nightmare", "settings.json") : nil
+      repo_config_alt = repo_root ? File.join(repo_root, ".nightmare", "config.json") : nil
       ws_config_file = File.join(workspace_config_dir, "config.json")
       global_config_file = File.join(global_config_dir, "config.json")
 
-      if File.exists?(ws_config_file)
+      if repo_config_file && File.exists?(repo_config_file)
+        load_and_patch(repo_config_file)
+      elsif repo_config_alt && File.exists?(repo_config_alt)
+        load_and_patch(repo_config_alt)
+      elsif File.exists?(ws_config_file)
         load_and_patch(ws_config_file)
       elsif File.exists?(global_config_file)
         load_and_patch(global_config_file)

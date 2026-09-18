@@ -87,7 +87,12 @@ module Nightmare::Workspace
         @manifest = Manifest.new(id: @workspace_id, canonical_path: @root)
       end
 
-      @settings = Settings.load_or_bootstrap(@config_dir, @global_config_dir, ensure_dirs: ensure_dirs)
+      @settings = Settings.load_or_bootstrap(
+        @config_dir,
+        @global_config_dir,
+        repo_root: @root,
+        ensure_dirs: ensure_dirs
+      )
     end
 
     def self.resolve(

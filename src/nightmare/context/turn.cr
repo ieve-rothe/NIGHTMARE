@@ -151,9 +151,11 @@ module Nightmare::Context
     getter index : Int32                     # position in turn.messages
     getter call : Mantle::Clients::ToolCall
     getter raw_size_bytes : Int32
+    getter original_content : String
     getter? shed : Bool = false
 
     def initialize(@turn : Turn, @index : Int32, @call : Mantle::Clients::ToolCall, @raw_size_bytes : Int32, @shed : Bool = false)
+      @original_content = @turn.messages[@index]?.try(&.content) || ""
     end
 
     def result_message : Mantle::Message
