@@ -198,7 +198,7 @@ module Nightmare::UI
           @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         end
         @output.flush
-      elsif name == "shell"
+      elsif name == "shell" || name == "run_command"
         cmd = args["command"]?.try(&.as_s?) || "shell"
         if result_str.starts_with?("[Execution rejected")
           tag = Theme.bracket_tag("EXEC", "REJECTED", Theme.status_tag)

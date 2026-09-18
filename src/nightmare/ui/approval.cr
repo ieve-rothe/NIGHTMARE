@@ -31,6 +31,14 @@ module Nightmare::UI
     rescue
     end
 
+    # Strips ANSI escape sequences (CSI, OSC, focus tracking, bracketed paste)
+    # and ASCII control characters from interactive terminal input.
+    private def sanitize_terminal_input(input : String) : String
+      clean = input.gsub(/\e\[[0-9;?]*[a-zA-Z~]/, "")
+      clean = clean.gsub(/\e\][^\a\e]*(\a|\e\\)/, "").gsub(/\e/, "")
+      clean.gsub(/[\x00-\x08\x0B-\x1F\x7F]/, "").strip
+    end
+
     # Renders interactive unified diff modal and prompts for line-mode approval
     def approve_diff(diff : String, description : String) : Bool
       flush_input
@@ -42,13 +50,14 @@ module Nightmare::UI
         @output.print "Approve #{description}? [y/N/a]: "
         @output.flush
 
-        input = @input.gets.try(&.strip) || ""
+        raw = @input.gets
+        return false if raw.nil?
+
+        input = sanitize_terminal_input(raw)
         case input.downcase
         when "y", "yes", "a"
           return true
-        when "n", "no"
-          return false
-        when ""
+        when "n", "no", ""
           # Default is N on empty/blank enter
           return false
         when "?", "help"
@@ -59,7 +68,8 @@ module Nightmare::UI
           @output.puts
           next
         else
-          return false
+          @output.puts "Notice: Unrecognized option '#{input}'. Choose [y/N/a] or '?' for help."
+          next
         end
       end
     end
@@ -175,19 +185,25 @@ module Nightmare::UI
       @output.puts panel.render_divider(border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_footer(border, Salamander::UI::BoxStyle::Armored)
-
+      flush_input
       loop do
         @output.print "Approve command? [y/N/e/a/p]: "
         @output.flush
 
-        input = @input.gets.try(&.strip) || ""
+        raw = @input.gets
+        return {Tools::ApprovalOutcome::No, nil} if raw.nil?
+
+        input = sanitize_terminal_input(raw)
         case input.downcase
         when "y", "yes"
           return {Tools::ApprovalOutcome::Yes, nil}
+        when "n", "no", ""
+          return {Tools::ApprovalOutcome::No, nil}
         when "e"
           @output.print "Edit command: "
           @output.flush
-          edited = @input.gets.try(&.strip) || ""
+          edited_raw = @input.gets
+          edited = edited_raw ? sanitize_terminal_input(edited_raw) : ""
           return {Tools::ApprovalOutcome::Edit, edited}
         when "a"
           if has_metachar
@@ -209,7 +225,8 @@ module Nightmare::UI
           @output.puts
           next
         else
-          return {Tools::ApprovalOutcome::No, nil}
+          @output.puts "Notice: Unrecognized option '#{input}'. Choose [y/N/e/a/p] or '?' for help."
+          next
         end
       end
     end

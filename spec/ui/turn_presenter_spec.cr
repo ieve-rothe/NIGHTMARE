@@ -192,6 +192,31 @@ describe Nightmare::UI::TurnPresenter do
     clean2.should contain("EXEC: FAILED")
   end
 
+  it "renders run_command tool results identically to shell" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Run command test")
+
+    args = {"command" => JSON::Any.new("python3 evaluate_exp1.py")}
+
+    # 1. Rejection
+    presenter.present_tool_result("run_command", args, "[Execution rejected by user]")
+    clean1 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean1.should_not contain("✓")
+    clean1.should contain("⚠")
+    clean1.should contain("EXEC: REJECTED")
+    clean1.should contain("python3 evaluate_exp1.py")
+
+    # 2. Success
+    io.clear
+    presenter.present_tool_result("run_command", args, "Evaluation passed: 100%")
+    clean2 = Salamander::UI::Panel.strip_ansi(io.to_s)
+    clean2.should contain("✓")
+    clean2.should contain("EXEC: SHELL")
+    clean2.should contain("Evaluation passed: 100%")
+  end
+
   it "renders the last agent response as a first-class card and truncates when long" do
     calibrator = Nightmare::Context::TokenEstimator.new
     io = IO::Memory.new

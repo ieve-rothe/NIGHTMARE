@@ -59,6 +59,25 @@ describe Nightmare::UI::Approval do
       approval_reject = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\n"), output: IO::Memory.new)
       approval_reject.approve_diff("diff", "desc").should be_false
     end
+
+    it "sanitizes terminal escape sequences in diff approval input" do
+      # Focus-in event + y
+      approval_focus = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\e[Iy\n"), output: IO::Memory.new)
+      approval_focus.approve_diff("diff", "desc").should be_true
+
+      # Bracketed paste + y
+      approval_paste = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\e[200~y\e[201~\n"), output: IO::Memory.new)
+      approval_paste.approve_diff("diff", "desc").should be_true
+    end
+
+    it "warns and reprompts on unrecognized diff approval option" do
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("invalid\ny\n"), output: output)
+      approval.approve_diff("diff", "desc").should be_true
+
+      out_str = output.to_s
+      out_str.should contain("Notice: Unrecognized option 'invalid'. Choose [y/N/a] or '?' for help.")
+    end
   end
 
   describe "#approve_command" do
@@ -141,6 +160,36 @@ describe Nightmare::UI::Approval do
       approval.approve_command("git status; ls", ["git", "status;", "ls"], true, 30)
       out_str = output.to_s
       out_str.should contain("metacharacters cannot be saved")
+    end
+
+    it "sanitizes terminal escape sequences in command approval input" do
+      approval_focus = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\e[Iy\n"), output: IO::Memory.new)
+      outcome, _ = approval_focus.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
+
+      approval_paste = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\e[200~y\e[201~\n"), output: IO::Memory.new)
+      outcome, _ = approval_paste.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
+    end
+
+    it "warns and reprompts on unrecognized command approval option" do
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("wat\ny\n"), output: output)
+      outcome, _ = approval.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
+
+      out_str = output.to_s
+      out_str.should contain("Notice: Unrecognized option 'wat'. Choose [y/N/e/a/p] or '?' for help.")
+    end
+
+    it "defaults to reject on blank enter or EOF" do
+      approval_blank = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new("\n"), output: IO::Memory.new)
+      outcome, _ = approval_blank.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::No)
+
+      approval_eof = Nightmare::UI::Approval.new("/tmp/workspace", input: IO::Memory.new(""), output: IO::Memory.new)
+      outcome, _ = approval_eof.approve_command("git status", ["git", "status"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::No)
     end
   end
 end
