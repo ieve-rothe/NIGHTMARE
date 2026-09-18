@@ -50,8 +50,6 @@ module Nightmare
     getter? no_log : Bool
     getter? markdown_formatting : Bool
 
-    @interrupted_effects : Array(String) = [] of String
-
     def initialize(
       @env : Workspace::Environment,
       system_prompt_path : String? = nil,
@@ -239,23 +237,16 @@ module Nightmare
       @cancellation.busy = true
       @stream_ctrl.reset
 
-      # Check if previous turn had side effects from interruption
-      active_input = user_input
-      if !@interrupted_effects.empty?
-        prefix = "[Previous turn was interrupted after modifying: #{@interrupted_effects.join(", ")}]\n"
-        active_input = "#{prefix}#{user_input}"
-        @interrupted_effects.clear
-      end
-
+      # Interruption advisory is handled centrally by SlidingStore#start_turn
       # Track side effects during this turn
       side_effects = [] of String
       @registry.set_active_side_effects(side_effects)
 
       # Start turn in context store
       prev_resp = @store.history.last?.try(&.last_assistant_text)
-      @turn_presenter.reset_for_new_turn(active_input, prev_resp)
+      @turn_presenter.reset_for_new_turn(user_input, prev_resp)
       @turn_presenter.active_skill_name = @skills_manager.active_skill.try(&.name)
-      user_msg = Mantle::Message.new("user", active_input)
+      user_msg = Mantle::Message.new("user", user_input)
       @store.start_turn(user_msg)
 
       pinned_block = @pinned_files.render_pinned_block(@guard)
@@ -310,7 +301,6 @@ module Nightmare
       else
         err = outcome.error.not_nil!
         if err.cancelled?
-          @interrupted_effects = side_effects.dup
           puts "\n[Turn cancelled by user interrupt]"
         else
           puts "\n[Error: #{err.message}]"

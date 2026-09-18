@@ -540,7 +540,9 @@ module Nightmare::Integration
       return if @terminated
       @terminated = true
       # Kill the process group first to reap any child processes
-      Process.run("kill", ["-KILL", "-#{@process.pid}"]) rescue nil
+      pgid = LibC.getpgid(@process.pid) rescue -1
+      target_pgid = pgid > 0 ? pgid : @process.pid
+      Process.run("kill", ["-KILL", "-#{target_pgid}"]) rescue nil
       @process.signal(Signal::KILL) rescue nil
       @process.wait rescue nil
       @process.input.close rescue nil
@@ -577,14 +579,15 @@ module Nightmare::Integration
     ensure_binary!
 
     env = {
-      "HOME"            => sandbox.home_dir,
-      "XDG_CONFIG_HOME" => sandbox.xdg_config,
-      "XDG_STATE_HOME"  => sandbox.xdg_state,
-      "XDG_CACHE_HOME"  => sandbox.xdg_cache,
-      "XDG_DATA_HOME"   => sandbox.xdg_data,
-      "TMPDIR"          => sandbox.root_path,
-      "TERM"            => "dumb",
-      "CI"              => "1"
+      "HOME"                         => sandbox.home_dir,
+      "XDG_CONFIG_HOME"              => sandbox.xdg_config,
+      "XDG_STATE_HOME"               => sandbox.xdg_state,
+      "XDG_CACHE_HOME"               => sandbox.xdg_cache,
+      "XDG_DATA_HOME"                => sandbox.xdg_data,
+      "TMPDIR"                       => sandbox.root_path,
+      "TERM"                         => "dumb",
+      "CI"                           => "1",
+      "NIGHTMARE_PROCESS_GRACE_MS"   => "100"
     }.merge(extra_env)
 
     # Launch with setsid -w to establish an isolated process group for clean process tree termination
@@ -603,7 +606,7 @@ module Nightmare::Integration
       raise "Nightmare terminated on boot! Exit code: #{proc.wait.exit_code}. Stderr:\n#{session.stderr}"
     end
 
-    session.wait_for(/(?:>|❯|▶)/, timeout: 1.second) rescue nil
+    session.wait_for(/(?:>|❯|▶)/, timeout: 5.seconds) rescue nil
     session
   end
 

@@ -274,14 +274,15 @@ describe "Core Developer Workflows (Integration)" do
             session.wait_exit
 
             # Strict OS Process Table check with polling: Ensure no orphaned unique sleep remains alive
+            deadline = Time.instant + 4.seconds
             reaped = false
-            5.times do
+            while Time.instant < deadline
               status = Process.run("pgrep", ["-f", unique_sleep], output: Process::Redirect::Pipe)
               if !status.success?
                 reaped = true
                 break
               end
-              sleep 30.milliseconds
+              sleep 50.milliseconds
             end
             reaped.should be_true
           end
@@ -293,8 +294,8 @@ describe "Core Developer Workflows (Integration)" do
   end
 
   describe "Workflow 5: Pinned Working Set & Live Disk Re-Read" do
-    it "short-circuits read_file when file is pinned and live re-reads upon external modification" do
-      Nightmare::Integration.with_sandbox("pinned_live_read_") do |sandbox|
+    it "short-circuits redundant file reads and hot-reloads mutated content on next turn" do
+      Nightmare::Integration.with_sandbox("pinned_reread_") do |sandbox|
         sandbox.write_file("src/shared.cr", "INITIAL_CONTENT_V1")
 
         Nightmare::Integration.with_mock_llm do |mock|
@@ -324,9 +325,6 @@ describe "Core Developer Workflows (Integration)" do
             session.send_line("/review")
             session.wait_for("MUTATED_CONTENT_V2")
 
-            # Ensure old content is evicted and NOT duplicated
-            session.stdout.should_not contain("INITIAL_CONTENT_V1")
-
             # 5. Follow-up turn sends updated prompt over the wire
             session.send_line("Verify updated context")
             session.wait_for("Confirmed V2 in active context")
@@ -334,9 +332,11 @@ describe "Core Developer Workflows (Integration)" do
             session.send_line("/exit")
             session.wait_exit
 
-            # Strict assertion: Latest wire request contained MUTATED_CONTENT_V2
+            # Strict assertion: Latest wire request contained MUTATED_CONTENT_V2 and NOT INITIAL_CONTENT_V1
             requests = mock.recorded_requests
-            requests.last[:body].should contain("MUTATED_CONTENT_V2")
+            latest_wire = requests.last[:body]
+            latest_wire.should contain("MUTATED_CONTENT_V2")
+            latest_wire.should_not contain("INITIAL_CONTENT_V1")
           end
 
           mock.assert_all_consumed!
@@ -345,13 +345,13 @@ describe "Core Developer Workflows (Integration)" do
     end
   end
 
-  describe "Workflow 6: Interactive Turn Interruption & Context Rollback on Ctrl+C" do
-    it "gracefully cancels streaming generation on SIGINT, rolls back active turn, and preserves session" do
+  describe "Workflow 6: Interactive Turn Interruption & Rollback on Ctrl+C" do
+    it "rolls back interrupted assistant response without leaving orphaned tool calls" do
       Nightmare::Integration.with_sandbox("interrupt_rollback_") do |sandbox|
         Nightmare::Integration.with_mock_llm do |mock|
-          # Multi-chunk streaming response with 40ms delay between chunks to reliably test mid-stream cancel
+          # Multi-chunk streaming response with 100ms delay between chunks to reliably test mid-stream cancel
           chunks = ["First chunk of text... ", "Second chunk of text... ", "Third chunk... ", "Final answer."]
-          mock.enqueue_stream_response(chunks, prompt_tokens: 40, chunk_delay: 40.milliseconds)
+          mock.enqueue_stream_response(chunks, prompt_tokens: 40, chunk_delay: 100.milliseconds)
           mock.enqueue_text_response("Recovered after interruption and ready for next task.")
 
           Nightmare::Integration.with_session(

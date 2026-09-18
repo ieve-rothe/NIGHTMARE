@@ -24,7 +24,11 @@ module Nightmare
     TURN_SPEND_CAP_TOKENS = 200_000
     DEFAULT_COMMAND_TIMEOUT = 60.seconds
     MAX_COMMAND_TIMEOUT = 600.seconds
-    PROCESS_GRACE_PERIOD = 2.seconds
+    PROCESS_GRACE_PERIOD = if (ms = ENV["NIGHTMARE_PROCESS_GRACE_MS"]?.try(&.to_i?))
+      ms.milliseconds
+    else
+      2.seconds
+    end
     TOOL_OUTPUT_MAX_BYTES = 24_576
     PER_FILE_MAX_TOKENS = 10_000
     BULK_DATA_PATTERNS = [
