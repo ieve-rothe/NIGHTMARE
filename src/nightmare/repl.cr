@@ -153,10 +153,11 @@ module Nightmare
         loop_detector: loop_detector,
         spend_cap: @env.settings.turn_spend_cap_tokens,
         shed_trigger_ratio: @env.settings.shed_trigger_ratio,
-        shed_keep_chars: nil,
+        shed_keep_chars: @env.settings.shed_keep_chars,
         shed_keep_verbatim: @env.settings.shed_keep_verbatim
       )
       retrier = Harness::Retrier.new(max_retries: @env.settings.rate_limit_retries)
+      failures_directory = File.join(@env.workspace_state_dir, "failures")
       @step_runner = Harness::StepRunner.new(
         client: client,
         tools: tools,
@@ -165,7 +166,8 @@ module Nightmare
         transcript: @transcript,
         max_iterations: @env.settings.max_iterations,
         format_retries: @env.settings.format_retries,
-        overflow_retries: @env.settings.context_overflow_retries
+        overflow_retries: @env.settings.context_overflow_retries,
+        failures_dir: failures_directory
       )
       @step_runner.turn_presenter = @turn_presenter
 

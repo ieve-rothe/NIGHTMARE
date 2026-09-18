@@ -34,7 +34,7 @@ module Nightmare::Harness
       @max_iterations : Int32 = Config::MAX_ITERATIONS,
       @format_retries : Int32 = Config::FORMAT_RETRIES,
       @overflow_retries : Int32 = Config::CONTEXT_OVERFLOW_RETRIES,
-      @failures_dir : String = File.join(Dir.current, ".nightmare", "failures")
+      @failures_dir : String = ""
     )
     end
 

@@ -166,6 +166,31 @@ module Nightmare::Tools
           output: Process::Redirect::Pipe,
           error: Process::Redirect::Pipe
         )
+      rescue ex : File::Error
+        # Self-healing CWD re-anchoring: the process's kernel CWD inode may have been
+        # unlinked (deleted and recreated directory). If guard.root still exists on disk,
+        # re-anchor via Dir.cd to bind to the new inode, then retry once.
+        if Dir.exists?(@guard.root)
+          begin
+            Dir.cd(@guard.root)
+            Process.new(
+              executable,
+              args: cmd_args,
+              chdir: @guard.root,
+              env: env,
+              clear_env: true,
+              input: dev_null,
+              output: Process::Redirect::Pipe,
+              error: Process::Redirect::Pipe
+            )
+          rescue retry_ex
+            dev_null.close
+            return {error: "Failed to spawn process after CWD re-anchoring: #{retry_ex.message}"}.to_json
+          end
+        else
+          dev_null.close
+          return {error: "Workspace root no longer exists: #{@guard.root} (#{ex.message})"}.to_json
+        end
       rescue ex
         dev_null.close
         return {error: "Failed to spawn process: #{ex.message}"}.to_json

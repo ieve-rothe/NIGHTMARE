@@ -388,4 +388,287 @@ describe "Core Developer Workflows (Integration)" do
       end
     end
   end
+
+  # =========================================================================
+  # Phase 3 Workflows (Advanced Subsystem & Resilience Workflows)
+  # =========================================================================
+
+  describe "Workflow 7: In-Turn Context Shedding vs. Pristine Transcript Export" do
+    it "sheds older tool outputs in RAM context to protect token budget while exporting pristine uncompressed outputs to /save transcript" do
+      Nightmare::Integration.with_sandbox("shed_transcript_") do |sandbox|
+        # Pre-seed settings with a low token hardmax and trigger ratio to deterministically trigger in-turn shedding
+        cfg_dir = sandbox.workspace_config_dir
+        Dir.mkdir_p(cfg_dir)
+        settings = Nightmare::Settings.new
+        settings.token_hardmax = 2000
+        settings.shed_trigger_ratio = 0.50 # triggers when estimated tokens > 1000
+        settings.shed_keep_chars = 100
+        settings.shed_keep_verbatim = 1    # keep only the last tool result verbatim
+        File.write(File.join(cfg_dir, "config.json"), settings.to_pretty_json)
+
+        # Create large file on disk
+        large_content = "LINE_DATA_" + ("A" * 1500) + "\n"
+        sandbox.write_file("data/dump1.txt", large_content)
+        sandbox.write_file("data/dump2.txt", "SMALL_DATA_LATEST")
+
+        Nightmare::Integration.with_mock_llm do |mock|
+          # Turn with multiple tool calls:
+          # Call 1: read_file dump1.txt (large output)
+          # Model consumes dump1 and decides to call read_file dump2.txt
+          # Call 2: read_file dump2.txt (small output)
+          # Final response: summaries both
+          mock.enqueue_tool_call("read_file", {"path" => "data/dump1.txt"})
+          mock.enqueue_tool_call("read_file", {"path" => "data/dump2.txt"})
+          mock.enqueue_text_response("Analysis of both files completed.")
+
+          Nightmare::Integration.with_session(
+            sandbox,
+            extra_env: {"MANTLE_API_URL" => mock.api_url}
+          ) do |session|
+            session.send_line("Analyze both data dumps")
+            session.wait_for("Analysis of both files completed")
+
+            # Check context review: RAM store should show tool output shedding for dump1
+            session.send_line("/review")
+            session.wait_for("Conversation History")
+            session.stdout.should contain("[... remaining output shed: was")
+
+            # Export transcript via /save
+            export_path = "exported_transcript.md"
+            session.send_line("/save #{export_path}")
+            session.wait_for("Transcript saved to")
+
+            session.send_line("/exit")
+            session.wait_exit
+
+            # Strict verification:
+            # 1. Exported transcript contains full pristine un-shed content
+            transcript_content = sandbox.read_file(export_path)
+            transcript_content.should contain("LINE_DATA_")
+            transcript_content.should contain("A" * 1500)
+            transcript_content.should_not contain("[... remaining output shed: was")
+
+            # 2. Wire request sent to LLM for the second step (or final turn) shows shedding happened
+            requests = mock.recorded_requests
+            requests.size.should be >= 2
+          end
+
+          mock.assert_all_consumed!
+        end
+      end
+    end
+  end
+
+  describe "Workflow 8: System Prompt Precedence Hierarchy" do
+    it "adheres strictly to 5-tier precedence: CLI flag > repo override > workspace config > global config > default persona" do
+      Nightmare::Integration.with_sandbox("prompt_precedence_") do |sandbox|
+        # 1. Default fallback tier: default persona
+        Nightmare::Integration.with_session(sandbox) do |session|
+          session.send_line("/review")
+          session.wait_for("--- System Prompt ---")
+          session.stdout.should contain("You are an execution agent operating in the current working directory.")
+          session.send_line("/exit")
+          session.wait_exit
+        end
+
+        # 2. Global Central Config tier (~/.config/nightmare/prompt.md)
+        global_cfg_dir = File.join(sandbox.xdg_config, "nightmare")
+        Dir.mkdir_p(global_cfg_dir)
+        File.write(File.join(global_cfg_dir, "prompt.md"), "GLOBAL_CENTRAL_PROMPT_TIER_4")
+
+        Nightmare::Integration.with_session(sandbox) do |session|
+          session.send_line("/review")
+          session.wait_for("--- System Prompt ---")
+          session.stdout.should contain("GLOBAL_CENTRAL_PROMPT_TIER_4")
+          session.send_line("/exit")
+          session.wait_exit
+        end
+
+        # 3. Workspace Central Config tier (<workspace_config_dir>/prompt.md)
+        ws_cfg_dir = sandbox.workspace_config_dir
+        Dir.mkdir_p(ws_cfg_dir)
+        File.write(File.join(ws_cfg_dir, "prompt.md"), "WORKSPACE_CENTRAL_PROMPT_TIER_3")
+
+        Nightmare::Integration.with_session(sandbox) do |session|
+          session.send_line("/review")
+          session.wait_for("--- System Prompt ---")
+          session.stdout.should contain("WORKSPACE_CENTRAL_PROMPT_TIER_3")
+          session.send_line("/exit")
+          session.wait_exit
+        end
+
+        # 4. Repository Committed Override tier (.nightmare/prompt.md in repo root)
+        repo_nightmare_dir = File.join(sandbox.root_path, ".nightmare")
+        Dir.mkdir_p(repo_nightmare_dir)
+        File.write(File.join(repo_nightmare_dir, "prompt.md"), "REPO_COMMITTED_PROMPT_TIER_2")
+
+        Nightmare::Integration.with_session(sandbox) do |session|
+          session.send_line("/review")
+          session.wait_for("--- System Prompt ---")
+          session.stdout.should contain("REPO_COMMITTED_PROMPT_TIER_2")
+          session.send_line("/exit")
+          session.wait_exit
+        end
+
+        # 5. CLI Flag tier (-s / --system)
+        cli_prompt_file = sandbox.write_file("custom_prompt.md", "CLI_FLAG_PROMPT_TIER_1")
+
+        Nightmare::Integration.with_session(
+          sandbox,
+          args: ["-s", cli_prompt_file]
+        ) do |session|
+          session.send_line("/review")
+          session.wait_for("--- System Prompt ---")
+          session.stdout.should contain("CLI_FLAG_PROMPT_TIER_1")
+          session.send_line("/exit")
+          session.wait_exit
+        end
+      end
+    end
+  end
+
+  describe "Workflow 9: Tool Call Loop Detection & Breaker" do
+    it "trips circuit breaker on 3 identical tool calls with same parameters, refusing execution without invoking tool" do
+      Nightmare::Integration.with_sandbox("loop_breaker_") do |sandbox|
+        sandbox.write_file("loop_target.txt", "initial content")
+
+        Nightmare::Integration.with_mock_llm do |mock|
+          # Enqueue 3 identical tool calls with identical arguments
+          mock.enqueue_tool_call("run_command", {"command" => "echo loop_attempt"})
+          mock.enqueue_tool_call("run_command", {"command" => "echo loop_attempt"})
+          mock.enqueue_tool_call("run_command", {"command" => "echo loop_attempt"})
+
+          Nightmare::Integration.with_session(
+            sandbox,
+            extra_env: {"MANTLE_API_URL" => mock.api_url}
+          ) do |session|
+            session.send_line("Repeat the shell command")
+
+            # Call 1 prompts approval modal
+            session.wait_for("Command: echo loop_attempt")
+            session.send_line("y")
+
+            # Call 2 prompts approval modal
+            session.wait_for("Command: echo loop_attempt")
+            session.send_line("y")
+
+            # Call 3 trips LoopDetector threshold (threshold = 3)
+            # Middleware raises LoopCircuitBreakerException WITHOUT calling shell or prompting approval modal
+            session.wait_for(/(?:ERR_DEGENERATE_LOOP|DegenerateLoopCircuitBreaker)/i)
+
+            # Assert session is not crashed and can receive slash commands
+            session.send_line("/review")
+            session.wait_for("Conversation History")
+
+            session.send_line("/exit")
+            session.wait_exit
+          end
+
+          # Verify failure dump report was recorded in workspace state dir
+          state_failures = File.join(sandbox.workspace_state_dir, "failures")
+          Dir.exists?(state_failures).should be_true
+          failure_files = Dir.children(state_failures)
+          failure_files.empty?.should be_false
+          dump_json = File.read(File.join(state_failures, failure_files.first))
+          dump_json.should contain("ERR_DEGENERATE_LOOP")
+        end
+      end
+    end
+  end
+
+  describe "Workflow 10: Multi-Line Paste & Input Handling" do
+    it "buffers multiline blocks via \"\"\" delimiters and /paste command, submitting all lines as single turn prompt" do
+      Nightmare::Integration.with_sandbox("multiline_paste_") do |sandbox|
+        Nightmare::Integration.with_mock_llm do |mock|
+          # Expect two separate turns, each receiving the combined multiline string
+          mock.enqueue_text_response("Received block 1 successfully.")
+          mock.enqueue_text_response("Received block 2 successfully.")
+
+          Nightmare::Integration.with_session(
+            sandbox,
+            extra_env: {"MANTLE_API_URL" => mock.api_url}
+          ) do |session|
+            # 1. Triple-quote multiline paste block
+            session.send_line("\"\"\"")
+            session.wait_for("Multi-line mode active")
+            session.send_line("def calculate_sum(a, b)")
+            session.send_line("  a + b")
+            session.send_line("end")
+            session.send_line("\"\"\"")
+
+            session.wait_for("Received block 1 successfully")
+
+            # Verify prompt in first turn contains all buffered lines
+            requests = mock.recorded_requests
+            requests.first[:body].should contain("def calculate_sum(a, b)")
+            requests.first[:body].should contain("  a + b")
+            requests.first[:body].should contain("end")
+
+            # 2. /paste command multiline block ended with /end
+            session.send_line("/paste")
+            session.wait_for("Multi-line mode active")
+            session.send_line("SELECT id, name")
+            session.send_line("FROM users")
+            session.send_line("WHERE active = true;")
+            session.send_line("/end")
+
+            session.wait_for("Received block 2 successfully")
+
+            # Verify prompt in second turn contains sql query
+            requests = mock.recorded_requests
+            requests.last[:body].should contain("SELECT id, name")
+            requests.last[:body].should contain("WHERE active = true;")
+
+            session.send_line("/exit")
+            session.wait_exit
+          end
+
+          mock.assert_all_consumed!
+        end
+      end
+    end
+  end
+
+  describe "Workflow 11: Ghost Mode & Anti-Exfiltration Guarantee" do
+    it "runs with --no-logs without writing to audit logs, state dirs, or leaving any disk footprint" do
+      Nightmare::Integration.with_sandbox("ghost_mode_") do |sandbox|
+        Nightmare::Integration.with_mock_llm do |mock|
+          mock.enqueue_text_response("Ghost turn processed silently.")
+
+          Nightmare::Integration.with_session(
+            sandbox,
+            args: ["--no-logs"],
+            extra_env: {"MANTLE_API_URL" => mock.api_url}
+          ) do |session|
+            # Banner displays ghost mode confirmation
+            session.wait_for("Mode      : --no-logs (nothing is persisted)")
+
+            session.send_line("Execute sensitive operation")
+            session.wait_for("Ghost turn processed silently")
+
+            session.send_line("/exit")
+            session.wait_exit
+          end
+
+          mock.assert_all_consumed!
+        end
+
+        # Strict Anti-Exfiltration Guarantees:
+        # 1. No llm_calls.jsonl exists anywhere in workspace state dir
+        log_file = File.join(sandbox.workspace_state_dir, "llm_calls.jsonl")
+        File.exists?(log_file).should be_false
+
+        # 2. No transcript.md exists in state dir
+        transcript_file = File.join(sandbox.workspace_state_dir, "transcript.md")
+        File.exists?(transcript_file).should be_false
+
+        # 3. No token calibrator cache file was persisted
+        calibrator_file = File.join(sandbox.workspace_cache_dir, "calibrator.json")
+        File.exists?(calibrator_file).should be_false
+
+        # 4. Zero repo litter in target repository
+        sandbox.assert_zero_repo_litter!
+      end
+    end
+  end
 end

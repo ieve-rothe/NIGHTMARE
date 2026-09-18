@@ -38,7 +38,7 @@ module Nightmare
       property no_log : Bool = false
       property model : String? = nil
       property markdown : Bool? = nil
-      property target_dir : String = Dir.current
+      property target_dir : String = ""
       property show_help : Bool = false
       property show_version : Bool = false
       property error_message : String? = nil
@@ -131,9 +131,23 @@ module Nightmare
         exit 0
       end
 
+      # Lazily resolve target_dir: if no explicit workspace path was given via CLI,
+      # resolve from Dir.current now (not at struct construction time) so that a
+      # getcwd(2) failure produces a clear fatal error rather than crashing the parser.
+      target = options.target_dir
+      if target.empty?
+        begin
+          target = Dir.current
+        rescue ex : File::Error
+          STDERR.puts "Fatal: Cannot determine current working directory: #{ex.message}"
+          STDERR.puts "The process's CWD may have been deleted. Pass an explicit workspace path as an argument."
+          exit 1
+        end
+      end
+
       begin
         env = Workspace::Environment.resolve(
-          options.target_dir,
+          target,
           ensure_dirs: !options.no_log,
           no_log: options.no_log
         )
