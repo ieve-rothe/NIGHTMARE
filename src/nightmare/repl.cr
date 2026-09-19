@@ -275,8 +275,10 @@ module Nightmare
         if @markdown_formatting && STDOUT.tty?
           if !@stream_ctrl.visible_text.empty?
             Salamander::UI.clear_and_reposition(@stream_ctrl.visible_text)
+            puts Salamander::UI.render_separator("Response")
             puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
           elsif !val.empty?
+            puts Salamander::UI.render_separator("Response")
             puts Salamander::UI::MarkdownFormatter.format(val)
           end
           STDOUT.flush

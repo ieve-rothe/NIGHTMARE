@@ -84,5 +84,11 @@ describe "Markdown Formatting Integration" do
         repl_no_md.markdown_formatting?.should be_false
       end
     end
+
+    it "renders the response separator for markdown formatted responses" do
+      separator = Salamander::UI.render_separator("Response")
+      separator.should contain("Response")
+      separator.should contain("───")
+    end
   end
 end

@@ -7,6 +7,7 @@ This file tracks the status and priority of all development tickets for the `nig
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | [TKT-002](notes/pm/TKT-002-kv-cache-utilization-metrics.md) | KV Cache Capacity and Utilization Metrics (Tokens and Memory) | Observability & Resource Management | Open | Med | 2026-09-11 |
+| [TKT-012](notes/pm/TKT-012-response-markdown-boundary-and-scrollback-delineation.md) | Visual Delineation and Response Boundary for Markdown REPL Output | User Interface & Tooling | Resolved | Med | 2026-09-18 |
 
 ## Closed Tickets
 
