@@ -2,7 +2,7 @@
 
 Module boundaries, data flows, type contracts, and the stochastic-to-deterministic boundary. Core tenets, user workflows, configuration, and the command reference live in [`USERS_GUIDE.md`](../USERS_GUIDE.md) and the user [guide](guide/).
 
-Target: Ollama local inference only. Frameworks: `mantle` (inference, tool loop), `salamander` (terminal UI), both first-party path-linked shards. `tts_kokoro` is a transitive requirement of `Salamander::Terminal` and is always constructed as `nil`.
+Target: Ollama local inference only. Frameworks: `mantle` (inference, tool loop), `salamander` (terminal UI), both first-party path-linked shards.
 
 ---
 
@@ -118,7 +118,7 @@ end
 
 ### 2.5 Salamander terminal
 
-`Salamander::UI#ask_user` is `print prompt; gets`. There is no termios handling, keypress reader, or raw mode. `Salamander::Terminal.run` wraps a `WaybarNotifier` and an optional `TtsKokoro::TTS` and yields a `UI` toolbelt (spinner control, `stream_text`, `terminal_width`, `clear_line`, markdown formatting). `Salamander::ChatSession#process_chunk` runs the `<think>` state machine.
+`Salamander::UI#ask_user` is `print prompt; gets`. There is no termios handling, keypress reader, or raw mode. `Salamander::Terminal.run` wraps a `WaybarNotifier` and yields a `UI` toolbelt (spinner control, `stream_text`, `terminal_width`, `clear_line`, markdown formatting). `Salamander::ChatSession#process_chunk` runs the `<think>` state machine.
 
 Consequences:
 

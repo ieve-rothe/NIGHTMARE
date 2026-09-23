@@ -9,8 +9,6 @@ dependencies:
     path: ../mantle
   salamander:
     path: ../salamander
-  tts_kokoro:
-    path: ../tts_kokoro
 
 targets:
   nightmare:
