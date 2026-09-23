@@ -1,6 +1,7 @@
 # NIGHTMARE LLM Harness
 
-Tagline: It's a human-in-the-loop terminal-computer-use LLM harness written in crystal lang, resident in ~25 MB RAM.
+Tagline: It's a human-in-the-loop terminal-computer-use LLM harness written in crystal lang, that's resident in ~25 MB RAM & boots instantly (even if your model runner does not.)
+
 The shorter tagline: It's like Claude Code, except cheaper ...and worse!
 
 General CONOPS:
