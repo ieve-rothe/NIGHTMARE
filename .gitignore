@@ -7,3 +7,5 @@ bug_report_files/
 /.shards/
 *.dwarf
 .agent/
+/nightmare
+patch_*.rb

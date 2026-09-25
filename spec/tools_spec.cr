@@ -414,7 +414,7 @@ PY
 
     it "executes web_search tool and enforces required parameters and API key checks" do
       with_temp_dir do |root|
-        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env = Nightmare::Workspace::Environment.new(root, xdg_config_home: File.join(root, "config"), ensure_dirs: false)
         guard = Nightmare::Tools::Guard.new(env)
         client = FakeClient.new
         registry = Nightmare::Tools::Registry.new(guard, client)
@@ -430,7 +430,11 @@ PY
 
         # Missing API key
         old_key = ENV["TAVILY_API_KEY"]?
+        old_tavily_key = ENV["TAVILY_KEY"]?
+        old_xdg = ENV["XDG_CONFIG_HOME"]?
         ENV.delete("TAVILY_API_KEY")
+        ENV.delete("TAVILY_KEY")
+        ENV["XDG_CONFIG_HOME"] = root
         begin
           res = tool.not_nil!.execute({"query" => JSON::Any.new("test search")})
           parsed = JSON.parse(res)
@@ -438,6 +442,12 @@ PY
           parsed["error"].as_s.should contain("TAVILY_API_KEY")
         ensure
           ENV["TAVILY_API_KEY"] = old_key if old_key
+          ENV["TAVILY_KEY"] = old_tavily_key if old_tavily_key
+          if old_xdg
+            ENV["XDG_CONFIG_HOME"] = old_xdg
+          else
+            ENV.delete("XDG_CONFIG_HOME")
+          end
         end
       end
     end
