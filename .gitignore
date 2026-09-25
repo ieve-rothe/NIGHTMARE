@@ -1,4 +1,5 @@
 /docs/*
+bug_report_files/
 !/docs/*.md
 !/docs/guide/
 /lib/
