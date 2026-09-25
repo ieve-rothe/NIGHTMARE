@@ -137,9 +137,11 @@ module Nightmare
         tool_output_max_bytes: @env.settings.tool_output_max_bytes,
         subagent_runner: subagent_runner
       )
+      cyclic_breaker = Mantle::Tools::Middleware::CyclicReadBreaker.new
       @registry.middlewares = [
         ToolMiddleware::Presentation.new(@turn_presenter),
         ToolMiddleware::LoopDetector.new(loop_detector),
+        cyclic_breaker,
         ToolMiddleware::ExceptionTrapping.new,
       ] of ToolMiddleware::Base
       tools = @registry.build_tools
