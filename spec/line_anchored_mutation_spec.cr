@@ -21,7 +21,7 @@ describe "Line-Anchored Mutation & Prefix Stripping (TKT-008)" do
       end
     end
 
-    it "defaults end_line to start_line if only start_line is provided" do
+    it "defaults end_line to start_line if only start_line is provided without target" do
       with_temp_dir do |dir|
         env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
         guard = Nightmare::Tools::Guard.new(env)
@@ -34,6 +34,78 @@ describe "Line-Anchored Mutation & Prefix Stripping (TKT-008)" do
         res.should contain("Successfully replaced lines 2..2 in sample.txt")
 
         File.read(file_path).should eq("line 1\nupdated line 2\nline 3\n")
+      end
+    end
+
+    it "derives end_line from multi-line target when start_line is provided and end_line is omitted" do
+      with_temp_dir do |dir|
+        env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        mutation = Nightmare::Tools::Mutation.new(guard, ->(diff : String, desc : String) { true })
+
+        file_path = File.join(dir, "sample.txt")
+        File.write(file_path, "line 1\nline 2\nline 3\nline 4\nline 5\n")
+
+        target = "line 2\nline 3\nline 4"
+        res = mutation.replace_in_file("sample.txt", target: target, replacement: "new 2..4\n", start_line: 2)
+        res.should contain("Successfully replaced lines 2..4 in sample.txt")
+
+        File.read(file_path).should eq("line 1\nnew 2..4\nline 5\n")
+      end
+    end
+
+    it "reproduces table replacement without duplicating subsequent rows when target is supplied with start_line" do
+      with_temp_dir do |dir|
+        env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        mutation = Nightmare::Tools::Mutation.new(guard, ->(diff : String, desc : String) { true })
+
+        file_path = File.join(dir, "index.md")
+        original_table = "## Open Tickets\n\n| Ticket ID | Title |\n| :--- | :--- |\n| TKT-001 | First |\n| TKT-002 | Second |\n\n## Closed Tickets\n"
+        File.write(file_path, original_table)
+
+        # Agent targets lines 3..6 (header + separator + 2 tickets) starting at line 3 without end_line
+        target_table = "| Ticket ID | Title |\n| :--- | :--- |\n| TKT-001 | First |\n| TKT-002 | Second |"
+        replacement_table = "| [TKT-001](tkt1.md) | First |\n| [TKT-002](tkt2.md) | Second |\n| [TKT-003](tkt3.md) | Third |"
+
+        res = mutation.replace_in_file("index.md", target: target_table, replacement: replacement_table, start_line: 3)
+        res.should contain("Successfully replaced lines 3..6 in index.md")
+
+        expected = "## Open Tickets\n\n| [TKT-001](tkt1.md) | First |\n| [TKT-002](tkt2.md) | Second |\n| [TKT-003](tkt3.md) | Third |\n\n## Closed Tickets\n"
+        File.read(file_path).should eq(expected)
+      end
+    end
+
+    it "returns error when target content does not match lines start_line..end_line" do
+      with_temp_dir do |dir|
+        env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        mutation = Nightmare::Tools::Mutation.new(guard, ->(diff : String, desc : String) { true })
+
+        file_path = File.join(dir, "sample.txt")
+        File.write(file_path, "line 1\nline 2\nline 3\n")
+
+        res = mutation.replace_in_file("sample.txt", target: "mismatched target\n", replacement: "new\n", start_line: 1, end_line: 2)
+        res.should contain("Target content does not match lines 1..2 in sample.txt")
+
+        File.read(file_path).should eq("line 1\nline 2\nline 3\n")
+      end
+    end
+
+    it "strips read_file display prefixes from target when verifying line-anchored replacement" do
+      with_temp_dir do |dir|
+        env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        mutation = Nightmare::Tools::Mutation.new(guard, ->(diff : String, desc : String) { true })
+
+        file_path = File.join(dir, "sample.txt")
+        File.write(file_path, "line 1\nline 2\nline 3\nline 4\n")
+
+        target = "    2 | line 2\n    3 | line 3\n"
+        res = mutation.replace_in_file("sample.txt", target: target, replacement: "updated 2..3\n", start_line: 2)
+        res.should contain("Successfully replaced lines 2..3 in sample.txt")
+
+        File.read(file_path).should eq("line 1\nupdated 2..3\nline 4\n")
       end
     end
 

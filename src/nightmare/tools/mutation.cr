@@ -82,7 +82,16 @@ module Nightmare::Tools
         end
 
         s_line = start_line || 1
-        e_line = end_line || start_line || total_lines
+        clean_target = has_display_prefixes?(target) ? strip_display_prefixes(target) : target
+
+        e_line = if end_line
+                   end_line
+                 elsif !clean_target.empty?
+                   target_line_count = clean_target.lines(chomp: false).size
+                   s_line + (target_line_count > 0 ? target_line_count - 1 : 0)
+                 else
+                   start_line || total_lines
+                 end
 
         if s_line < 1 || e_line < s_line || s_line > total_lines || e_line > total_lines
           return {error: "Invalid line range #{s_line}..#{e_line} for #{rel_path} (file has #{total_lines} lines)"}.to_json
@@ -90,6 +99,16 @@ module Nightmare::Tools
 
         clean_replacement = has_display_prefixes?(replacement) ? strip_display_prefixes(replacement) : replacement
         original_segment = lines[(s_line - 1)...e_line].join
+
+        if !clean_target.empty?
+          norm_target = clean_target.gsub("\r\n", "\n")
+          norm_segment = original_segment.gsub("\r\n", "\n")
+          target_normalized = norm_target.ends_with?('\n') ? norm_target : "#{norm_target}\n"
+          segment_normalized = norm_segment.ends_with?('\n') ? norm_segment : "#{norm_segment}\n"
+          if target_normalized != segment_normalized && norm_target != norm_segment
+            return {error: "Target content does not match lines #{s_line}..#{e_line} in #{rel_path}"}.to_json
+          end
+        end
 
         if original_segment.ends_with?('\n') && !clean_replacement.empty? && !clean_replacement.ends_with?('\n')
           clean_replacement = "#{clean_replacement}\n"

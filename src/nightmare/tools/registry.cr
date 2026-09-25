@@ -167,10 +167,10 @@ module Nightmare::Tools
     private def build_replace_in_file_tool : Mantle::Tools::Tool
       props = {
         "path"        => Mantle::Tools::PropertyDefinition.new("string", "Path to file to edit"),
-        "target"      => Mantle::Tools::PropertyDefinition.new("string", "Exact unique substring to replace (optional if start_line/end_line provided)"),
+        "target"      => Mantle::Tools::PropertyDefinition.new("string", "Exact unique substring to replace. When provided with start_line, validates content and derives end_line if end_line is omitted."),
         "replacement" => Mantle::Tools::PropertyDefinition.new("string", "Replacement content"),
         "start_line"  => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based start line number for line-anchored replacement"),
-        "end_line"    => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based end line number for line-anchored replacement"),
+        "end_line"    => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based end line number. If omitted when target is provided, derived from target length; if omitted without target, defaults to start_line."),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["path", "replacement"])
       func = Mantle::Tools::FunctionDefinition.new(
