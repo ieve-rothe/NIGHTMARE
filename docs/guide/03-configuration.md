@@ -40,6 +40,25 @@ Settings resolve through specific priority chains.
 | 3 | Global Config | `settings.api_url` |
 | 4 | Default | `http://127.0.0.1:11434/api/chat` |
 
+### Service & API Keys
+
+NIGHTMARE provides a unified key resolver (`Nightmare::Keys`) that searches across environment variables and dedicated configuration key files without committing secrets into project repositories.
+
+Keys (such as for `web_search`) resolve through the following priority order:
+
+1. **Environment Variables**: `<NAME>_API_KEY` or `<NAME>_KEY` (e.g., `TAVILY_API_KEY` or `TAVILY_KEY`).
+2. **Workspace Keys Directory**: `~/.config/nightmare/workspaces/<id>/keys/<name>`.
+3. **Global Keys Directory**: `~/.config/nightmare/keys/<name>` (e.g., `~/.config/nightmare/keys/tavily`).
+4. **Global Fallback File**: `~/.config/nightmare/<name>_key` (e.g., `~/.config/nightmare/tavily_key`).
+
+The `~/.config/nightmare/keys/` directory is automatically created on startup. You can store your API key by saving it directly to `~/.config/nightmare/keys/tavily`:
+
+```bash
+mkdir -p ~/.config/nightmare/keys
+echo "tvly-your-api-key" > ~/.config/nightmare/keys/tavily
+chmod 600 ~/.config/nightmare/keys/tavily
+```
+
 ### System Prompt Cascade
 
 The system prompt dictates agent behavior. It cascades through 5 tiers:

@@ -353,6 +353,53 @@ PY
     end
   end
 
+  describe "web_search tool integration" do
+    it "includes web_search in both primary tools and subagent tools" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        registry = Nightmare::Tools::Registry.new(guard, client)
+
+        primary_names = registry.build_tools.map(&.function.name)
+        primary_names.should contain("web_search")
+
+        subagent_names = registry.build_subagent_tools.map(&.function.name)
+        subagent_names.should contain("web_search")
+      end
+    end
+
+    it "executes web_search tool and enforces required parameters and API key checks" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        registry = Nightmare::Tools::Registry.new(guard, client)
+
+        tool = registry.build_tools.find { |t| t.function.name == "web_search" }
+        tool.should_not be_nil
+
+        # Missing query
+        missing_query_res = tool.not_nil!.execute({} of String => JSON::Any)
+        parsed_missing = JSON.parse(missing_query_res)
+        parsed_missing["success"].as_bool.should be_false
+        parsed_missing["error"].as_s.should contain("Missing required parameter: query")
+
+        # Missing API key
+        old_key = ENV["TAVILY_API_KEY"]?
+        ENV.delete("TAVILY_API_KEY")
+        begin
+          res = tool.not_nil!.execute({"query" => JSON::Any.new("test search")})
+          parsed = JSON.parse(res)
+          parsed["success"].as_bool.should be_false
+          parsed["error"].as_s.should contain("TAVILY_API_KEY")
+        ensure
+          ENV["TAVILY_API_KEY"] = old_key if old_key
+        end
+      end
+    end
+  end
+
   describe "hardened security boundaries and vulnerability mitigations" do
     it "isolates parent process environment and prevents secret leakage (VULN-01)" do
       with_temp_dir do |root|

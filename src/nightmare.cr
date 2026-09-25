@@ -4,6 +4,7 @@ require "salamander"
 require "./nightmare/exceptions"
 require "./nightmare/config"
 require "./nightmare/settings"
+require "./nightmare/keys"
 require "./nightmare/workspace/manifest"
 require "./nightmare/workspace/environment"
 require "./nightmare/system_prompt/resolver"
@@ -30,7 +31,7 @@ require "./nightmare/harness/subagent_runner"
 require "./nightmare/repl"
 
 module Nightmare
-  VERSION = "0.2.1"
+  VERSION = "0.3.0"
 
   module CLI
     struct Options

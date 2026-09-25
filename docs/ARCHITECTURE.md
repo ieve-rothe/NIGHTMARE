@@ -25,7 +25,8 @@ Nightmare
 │   ├── ReadOnly                  # list_files, search, read_file, file_info
 │   ├── Mutation                  # replace_in_file, append_to_file, write_file (diff modal)
 │   ├── Shell                     # run_command, argv tokenizer, pgid supervisor, allowlists
-│   └── Delegation                # ask_model (isolated, stateless one-shot inference)
+│   ├── Delegation                # spawn_subagent (isolated subagent execution)
+│   └── WebSearch                 # web_search (delegated to Mantle::Tools::Builtin::WebSearch)
 ├── Harness
 │   ├── ToolLoop                  # on_iteration hook: capture, calibrate, shed
 │   ├── StepRunner                # Mantle::Step construction + Result boundary

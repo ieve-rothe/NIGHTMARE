@@ -6,7 +6,7 @@ The shorter tagline: It's like Claude Code, except cheaper ...and worse!
 
 General CONOPS:
 * Terminal interface; Navigate to work directory in shell, run 'nightmare', bot loads with cwd as its cwd.
-* Bots get file read/write/search, a (guarded) shell execute, and (depth controlled) subagent delegation. Surely that's enough for anybody...
+* Bots get file read/write/search, web search (via Tavily), a (guarded) shell execute, and (depth controlled) subagent delegation. Surely that's enough for anybody...
 * Basic chat loop interface, bot is allowed to spin on tool loops up to N (configurable) iterations, user approves diffs / shell commands, return to user for next prompt.
 * This tool doesn't leave any in-repo litter. There is XDG-directory-centralized observability/event logging and state storage, segmented based on cwd at harness boot. (Centralized harness data storage can be disabled by config or flag).
 * A handful of useful commands for inspecting and managing harness state are provided at the terminal prompt interface - see /help
@@ -14,7 +14,7 @@ General CONOPS:
 Agent execution security:
 * This is meant to be a 'human in the loop' harness for prototyping workflows and giving a bot (especially with an orchestrator farming work out) the leeway to go off on a long-running task, but ... they're on a leash. (They don't know about the leash... don't tell em plz)
 * SO ...
-  * Within-cwd, file/directory reads, grep search and creation of new files is allowed without human approval
+  * Within-cwd, file/directory reads, grep search, web search, and creation of new files is allowed without human approval
   * A few sensitive directory / file types are guarded and can never be read by the agent (eg .git/*, .env*)
   * File writes (other than new) require diff approval
   * Subagent delegation is allowed without human approval
@@ -51,7 +51,7 @@ Observability:
 ### Build
 
 ```bash
-shards build
+shards build --release
 ```
 
 The compiled binary will be placed at `bin/nightmare`.

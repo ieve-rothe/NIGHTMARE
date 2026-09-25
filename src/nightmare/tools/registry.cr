@@ -10,6 +10,7 @@ require "./mutation"
 require "./shell"
 require "./middleware"
 require "../harness/subagent_runner"
+require "../keys"
 
 module Nightmare::Tools
   class Registry
@@ -62,6 +63,7 @@ module Nightmare::Tools
         build_append_to_file_tool,
         build_run_command_tool,
         build_spawn_subagent_tool,
+        build_web_search_tool,
       ]
       ToolMiddleware.wrap_all(tools, @middlewares)
     end
@@ -77,6 +79,7 @@ module Nightmare::Tools
         build_replace_in_file_tool,
         build_append_to_file_tool,
         build_run_command_tool,
+        build_web_search_tool,
       ]
       ToolMiddleware.wrap_all(tools, @middlewares)
     end
@@ -251,6 +254,10 @@ module Nightmare::Tools
           "[Subagent error: No subagent runner configured]"
         end
       end
+    end
+
+    private def build_web_search_tool : Mantle::Tools::Tool
+      Mantle::Tools::Builtin::WebSearch.create(->{ Keys.get?("tavily", @guard.env) })
     end
   end
 end

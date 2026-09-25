@@ -2,7 +2,7 @@ require "./spec_helper"
 
 describe Nightmare do
   it "defines VERSION" do
-    Nightmare::VERSION.should eq("0.2.1")
+    Nightmare::VERSION.should eq("0.3.0")
   end
 
   it "defines SecurityError exception type" do

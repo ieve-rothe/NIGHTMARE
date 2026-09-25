@@ -1,6 +1,6 @@
 # Tools
 
-NIGHTMARE equips the LLM with 9 tools partitioned into read-only, mutation, shell, and delegation categories.
+NIGHTMARE equips the LLM with 10 tools partitioned into read-only, mutation, shell, delegation, and web search categories.
 
 ## 1. Read-Only Tools
 
@@ -201,6 +201,33 @@ Subagents operate under strict guardrails to prevent runaway execution and state
 1. **No Recursion:** Subagents are not provided the `spawn_subagent` tool.
 2. **No Git Mutations:** Commands like `git commit`, `git checkout`, `git push`, or `git reset` are blocked. Only read-only git commands (`status`, `diff`, `log`, etc.) are permitted.
 3. **File Boundaries:** Subagents can only mutate files listed in `files_targeted` (if specified).
+
+## 5. Web Search Tool
+
+Web search enables real-time external information retrieval beyond local workspace boundaries.
+
+### `web_search`
+Performs a real-time web search using the Tavily API to retrieve up-to-date information. Available to both the primary agent and subagents.
+
+> [!NOTE]
+> Requires a Tavily API key set in `TAVILY_API_KEY` or stored in `~/.config/nightmare/keys/tavily` (or `~/.config/nightmare/tavily_key`).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | String | Yes | The search query to perform. |
+| `search_depth` | String | No | The depth of the search (`"basic"` or `"advanced"`, defaults to `"basic"`). |
+| `max_results` | Integer | No | Maximum number of search results to return (defaults to 5). |
+
+```json
+{
+  "name": "web_search",
+  "arguments": {
+    "query": "Crystal language 1.21 release notes",
+    "search_depth": "basic",
+    "max_results": 5
+  }
+}
+```
 
 ---
 [Previous: Configuration](03-configuration.md) | [Next: Approval Boundary](05-approval-boundary.md)
