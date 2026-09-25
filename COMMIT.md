@@ -22,6 +22,14 @@ When bumping the version, update **all three** of these files in the same commit
 All three MUST match. Forgetting one will cause either a runtime mismatch or a
 spec failure.
 
+### Release Script
+
+To release, run from `nightmare/`:
+```bash
+../scripts/release.sh patch  # or minor, major
+```
+This automatically updates all three files, verifies specs, and tags the release.
+
 ## Common Scopes
 
 Use these scopes in commit messages where applicable:
