@@ -172,7 +172,16 @@ module Nightmare
       )
       @step_runner.turn_presenter = @turn_presenter
 
-      @stream_ctrl = UI::StreamController.new
+@stream_ctrl = UI::StreamController.new
+@stream_ctrl.on_print = ->(s : String) {
+  if @turn_presenter.split_mode_active?
+    @turn_presenter.append_stream_text(s)
+  else
+    print s
+    STDOUT.flush
+  end
+}
+
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       @skills_manager = Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
       on_model = ->(new_model : String) {
@@ -277,7 +286,7 @@ module Nightmare
         val = outcome.value.not_nil!
         if @markdown_formatting && STDOUT.tty?
           if !@stream_ctrl.visible_text.empty?
-            Salamander::UI.clear_and_reposition(@stream_ctrl.visible_text)
+            Salamander::UI.clear_and_reposition(@stream_ctrl.visible_text) unless @turn_presenter.split_mode_active?
             puts Salamander::UI.render_separator("Response")
             puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
           elsif !val.empty?

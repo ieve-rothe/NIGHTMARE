@@ -54,7 +54,16 @@ module Nightmare::UI
     property preview_lines : Int32
     property max_width : Int32
     property? enabled : Bool
-    property output : IO
+property output : IO
+
+# Split mode properties
+property stream_history : Array(String) = [] of String
+property stream_current : String = ""
+property last_render : String? = nil
+property last_active_file : OpenedFile? = nil
+property last_active_offset : Int32 = 1
+property last_action_label : String? = nil
+
 
     def initialize(
       @calibrator : Context::TokenEstimator,
@@ -66,6 +75,52 @@ module Nightmare::UI
       @max_response_lines : Int32 = 6
     )
     end
+
+    def split_mode_active? : Bool
+  @enabled && Salamander::UI.terminal_width > @max_width + 50 && STDOUT.tty?
+end
+
+def append_right_pane(msg : String) : Nil
+  msg.lines.each do |l|
+    @stream_history << l
+  end
+  enforce_history_limit
+  if split_mode_active?
+    render_dashboard(@last_active_file, @last_active_offset, @last_action_label)
+  end
+end
+
+def append_stream_text(chunk : String) : Nil
+  chunk.each_char do |c|
+    if c == '\n'
+      @stream_history << @stream_current
+      @stream_current = ""
+    else
+      @stream_current += c
+    end
+  end
+  enforce_history_limit
+  if split_mode_active?
+    render_dashboard(@last_active_file, @last_active_offset, @last_action_label)
+  end
+end
+
+private def enforce_history_limit : Nil
+  term_h = Salamander::UI.terminal_height
+  limit = Math.max(10, term_h - 2)
+  if @stream_history.size > limit
+    @stream_history.shift(@stream_history.size - limit)
+  end
+end
+
+def display_msg(msg : String) : Nil
+  if split_mode_active?
+    append_right_pane(msg)
+  else
+    @output.puts msg
+    @output.flush
+  end
+end
 
     def reset_for_new_turn(user_prompt : String, previous_response : String? = nil) : Nil
       @opened_files.clear
@@ -146,27 +201,27 @@ module Nightmare::UI
 
         if result_str.starts_with?("[Refused:")
           tag = Theme.bracket_tag("GUARD", "REFUSED", Theme.status_tag)
-          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET}"
           result_str.strip.each_line do |line|
-            @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+            display_msg "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
           end
           @output.flush
           return
         elsif result_str.starts_with?("[File is already pinned")
           tag = Theme.bracket_tag("PINNED", "SHORT-CIRCUIT", Theme.status_tag)
-          @output.puts "  #{Theme.status_tag}📌#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}📌#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
           @output.flush
           return
         elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("READ", "FAILED", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
           @output.flush
           return
         end
 
         opened = record_file_open(path, result_str, offset, limit)
 
-        if collapsed_mode?
+        if collapsed_mode? || split_mode_active?
           render_dashboard(active_file: opened, active_offset: offset || 1, action_label: "read_file('#{path}')")
         else
           # Under threshold: render verbatim inside clean panel
@@ -189,28 +244,28 @@ module Nightmare::UI
         path = args["path"]?.try(&.as_s?) || args["filepath"]?.try(&.as_s?) || "file"
         if result_str.starts_with?("[Execution rejected")
           tag = Theme.bracket_tag("MUTATION", "REJECTED", Theme.status_tag)
-          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
         elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("MUTATION", "ERROR", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           tag = Theme.bracket_tag("MUTATION", name.upcase, Theme.success_icon)
-          @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         end
         @output.flush
       elsif name == "shell" || name == "run_command"
         cmd = args["command"]?.try(&.as_s?) || "shell"
         if result_str.starts_with?("[Execution rejected")
           tag = Theme.bracket_tag("EXEC", "REJECTED", Theme.status_tag)
-          @output.puts "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}⚠#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· execution rejected by user#{Theme::RESET}"
         elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("[Timeout") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("EXEC", "FAILED", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           tag = Theme.bracket_tag("EXEC", "SHELL", Theme.status_tag)
-          @output.puts "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET}"
+          display_msg "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.highlight}#{cmd}#{Theme::RESET}"
           result_str.strip.each_line do |line|
-            @output.puts "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
+            display_msg "    #{Theme.meta_dim}│#{Theme::RESET} #{Theme.code_text}#{line}#{Theme::RESET}"
           end
         end
         @output.flush
@@ -218,15 +273,15 @@ module Nightmare::UI
         path = args["path"]?.try(&.as_s?) || ""
         if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("INFO", "FAILED", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           info = JSON.parse(result_str) rescue nil
           if info
             size = format_bytes(info["size_bytes"]?.try(&.as_i64?) || 0_i64)
             lines = info["lines"]?.try(&.as_i?) || 0
-            @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}(#{size} · #{lines}L)#{Theme::RESET}"
+            display_msg "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}(#{size} · #{lines}L)#{Theme::RESET}"
           else
-            @output.puts "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}#{result_str.strip}#{Theme::RESET}"
+            display_msg "  #{Theme.status_tag}ℹ#{Theme::RESET} #{Theme.bracket_tag("INFO", path)} #{Theme.meta_dim}#{result_str.strip}#{Theme::RESET}"
           end
         end
         @output.flush
@@ -234,39 +289,96 @@ module Nightmare::UI
         pattern = args["pattern"]?.try(&.as_s?) || args["query"]?.try(&.as_s?) || ""
         if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("SEARCH", "FAILED", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           match_count = result_str.lines.size
-          @output.puts "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
+          display_msg "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
         end
         @output.flush
       elsif name == "list_files"
         path = args["path"]?.try(&.as_s?) || args["directory"]?.try(&.as_s?) || "."
         if result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
           tag = Theme.bracket_tag("LIST", "FAILED", Theme.border_danger)
-          @output.puts "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+          display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           file_count = result_str.lines.size
-          @output.puts "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
         end
         @output.flush
       else
         # For non-file tools, print result or summary
-        @output.puts result_str
-        @output.flush
+        display_msg result_str
       end
     end
 
     # Clears screen and renders single-turn dashboard with Opened Files Deck & Active Preview
     def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil) : Nil
-      term_w = Salamander::UI.terminal_width
-      term_h = Salamander::UI.terminal_height
-      box_w = Panel.clamp_width(term_w, @max_width)
-      panel = Panel.new(box_w, Theme.box_style)
+  @last_active_file = active_file
+  @last_active_offset = active_offset
+  @last_action_label = action_label
 
-      if @output == STDOUT && STDOUT.tty?
-        Salamander::UI.clear_screen
-      end
+  term_w = Salamander::UI.terminal_width
+  term_h = Salamander::UI.terminal_height
+  box_w = Panel.clamp_width(term_w, @max_width)
+
+  mem = IO::Memory.new
+  old_out = @output
+  @output = mem
+  render_dashboard_inner(active_file, active_offset, action_label, box_w, term_h)
+  @output = old_out
+  left_str = mem.to_s
+
+  if split_mode_active?
+    right_w = term_w - box_w - 3
+    left_lines = left_str.lines
+    
+    right_lines = [] of String
+    @stream_history.each do |line|
+       right_lines.concat(Panel.wrap_text(line, right_w))
+    end
+    if !@stream_current.empty?
+       right_lines.concat(Panel.wrap_text(@stream_current, right_w))
+    end
+    
+    disp_h = term_h - 1
+    if right_lines.size > disp_h
+       right_lines = right_lines.last(disp_h)
+    end
+    
+    out_lines = [] of String
+    max_lines = Math.max([left_lines.size, right_lines.size].max, disp_h)
+    
+    (0...max_lines).each do |i|
+      l = left_lines[i]? || ""
+      l_vis = Panel.visual_width(l)
+      pad = Math.max(0, box_w - l_vis)
+      r = right_lines[i]? || ""
+      out_lines << "#{l}#{" " * pad} │ #{r}"
+    end
+    
+    screen = out_lines.join("\n")
+    if last = @last_render
+      Salamander::UI.clear_and_reposition(last, @output)
+    else
+      Salamander::UI.clear_screen if @output == STDOUT
+    end
+    @output.puts screen
+    @output.flush
+    @last_render = screen
+  else
+    if @output == STDOUT && STDOUT.tty?
+      Salamander::UI.clear_screen
+    end
+    @output.print left_str
+    @output.flush
+    @last_render = left_str
+  end
+end
+
+def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, action_label : String?, box_w : Int32, term_h : Int32) : Nil
+  panel = Panel.new(box_w, Theme.box_style)
+
+      
 
       # 1. Turn Banner & Prompt Card
       turn_title = "#{Theme.title}NIGHTMARE REPL#{Theme::RESET} #{Theme.meta_dim}· TURN #{@turn_number}#{Theme::RESET}"

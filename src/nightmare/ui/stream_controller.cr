@@ -6,6 +6,7 @@ module Nightmare::UI
   class StreamController
     getter visible_text : String = ""
     getter thinking_text : String? = nil
+    property on_print : Proc(String, Nil) = ->(s : String) { print s; STDOUT.flush }
 
     @visible_buffer : String::Builder = String::Builder.new
     @thinking_buffer : String::Builder = String::Builder.new
@@ -35,8 +36,7 @@ module Nightmare::UI
         if @in_think
           @thinking_buffer << @pending
         else
-          print @pending
-          STDOUT.flush
+          @on_print.call(@pending)
           @visible_buffer << @pending
         end
         @pending = ""
@@ -73,8 +73,7 @@ module Nightmare::UI
           if idx = @pending.index("<think>")
             before = @pending[0...idx]
             if !before.empty?
-              print before
-              STDOUT.flush
+              @on_print.call(before)
               @visible_buffer << before
             end
             @pending = @pending[(idx + 7)..]
@@ -85,8 +84,7 @@ module Nightmare::UI
             if prefix_len > 0
               safe_part = @pending[0...(@pending.size - prefix_len)]
               if !safe_part.empty?
-                print safe_part
-                STDOUT.flush
+                @on_print.call(safe_part)
                 @visible_buffer << safe_part
               end
               @pending = @pending[(@pending.size - prefix_len)..]
