@@ -472,6 +472,8 @@ module Nightmare::Harness
         io << "2. NEVER run git commit, git checkout, git reset, git merge, git push, or other git mutation commands.\n"
         io << "3. You are restricted to modifying files within your target file bounds if specified.\n"
         io << "4. When complete, provide a final response summarizing what you inspected, changed, or discovered.\n"
+        io << "5. DO NOT read files to 'understand the whole system' or 'explore the architecture'. You have a strict token limit. Target ONLY the specific lines/files relevant to your task.\n"
+        io << "6. If your task is a research question, inspect only the minimum necessary files, extract the exact answer, and report it concisely.\n"
       end
     end
 

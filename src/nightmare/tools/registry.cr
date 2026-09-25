@@ -125,7 +125,7 @@ module Nightmare::Tools
       schema = Mantle::Tools::ParametersSchema.new(props, ["path"])
       func = Mantle::Tools::FunctionDefinition.new(
         "read_file",
-        "Reads file contents safely with optional line offset and limit. Returns file contents with '<line> | ' prefixes for line referencing. Use these line numbers with replace_in_file's 'start_line' and 'end_line'.",
+        "Reads file contents safely with optional line offset and limit. Returns file contents with '<line> | ' prefixes for line referencing. Use these line numbers with replace_in_file's 'start_line' and 'end_line'. DO NOT read files to 'learn the system' or 'understand the workflow'; if you need architectural research, use spawn_subagent with a targeted question.",
         schema
       )
 
@@ -233,7 +233,7 @@ module Nightmare::Tools
       schema = Mantle::Tools::ParametersSchema.new(props, ["task"])
       func = Mantle::Tools::FunctionDefinition.new(
         "spawn_subagent",
-        "Spawns an autonomous subagent with its own tool loop to execute a concrete subtask without polluting parent history.",
+        "Spawns an autonomous subagent with its own isolated memory. Highly recommended for targeted research questions (e.g. 'How does module X work?'), surveys, or multi-step execution tasks, returning a concise deliverable without polluting parent history.",
         schema
       )
 
