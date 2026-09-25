@@ -6,6 +6,8 @@ This file tracks the status and priority of all development tickets for the `nig
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-022](notes/pm/TKT-022-degenerate-loop-history-salvage-and-session-recovery.md) | Degenerate Loop History Salvage and /recover Session Restoration | Context & Session Resilience | Open | High | 2026-09-25 |
+| [TKT-021](notes/pm/TKT-021-cooperative-cancellation-and-session-recovery-during-approval-prompts.md) | Cooperative Cancellation and Session Recovery during Approval Prompts | Harness Stability & Tool Ergonomics | Open | High | 2026-09-25 |
 | [TKT-002](notes/pm/TKT-002-kv-cache-utilization-metrics.md) | KV Cache Capacity and Utilization Metrics (Tokens and Memory) | Observability & Resource Management | Open | Med | 2026-09-11 |
 | [TKT-012](notes/pm/TKT-012-response-markdown-boundary-and-scrollback-delineation.md) | Visual Delineation and Response Boundary for Markdown REPL Output | User Interface & Tooling | Resolved | Med | 2026-09-18 |
 | [TKT-013](notes/pm/TKT-013-slash-command-sidechannel-llm-turn.md) | Slash Command for Sidechannel LLM Turn (Dispatch Recipes) | Tooling & Automation | Open | Med | 2024-05-22 |
@@ -14,6 +16,7 @@ This file tracks the status and priority of all development tickets for the `nig
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-020](notes/pm/closed/TKT-020-subagent-context-shedding-and-loop-detection.md) | Subagent Context Resilience — In-Turn Shedding, Loop Detection, and Context Protection | Harness Stability & Subagents | Closed | High | 2026-09-25 |
 | [TKT-018](notes/pm/closed/TKT-018-subagent-cancellation-and-process-termination.md) | Subagent Cooperative Cancellation, Process Termination, and Interrupt Propagation | Harness Stability & Subagents | Closed | High | 2026-09-25 |
 | [TKT-019](notes/pm/closed/TKT-019-fix-read-file-offset-arithmetic-overflow.md) | Fix ToolExecutionFailure Arithmetic Overflow in read_file with Offset | Harness Stability & Tool Ergonomics | Closed | High | 2026-09-25 |
 | [TKT-016](notes/pm/closed/TKT-016-integrate-websearch-tool-into-nightmare-registry.md) | Integrate WebSearch Tool into Nightmare Registry | Tooling & Automation | Closed | Med | 2026-09-25 |

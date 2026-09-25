@@ -301,4 +301,178 @@ describe Nightmare::Harness::SubagentRunner do
       end
     end
   end
+
+  describe "Subagent Context Resilience (TKT-020)" do
+    it "triggers in-turn shedding during multi-file reads" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.token_hardmax = 2_000
+        env.settings.shed_trigger_ratio = 0.5
+        env.settings.shed_keep_verbatim = 1
+        env.settings.shed_file_keep_chars = 200
+
+        File.write(File.join(temp_dir, "doc1.txt"), "Doc1 Header\n" + ("Line of content A\n" * 250))
+        File.write(File.join(temp_dir, "doc2.txt"), "Doc2 Header\n" + ("Line of content B\n" * 250))
+        File.write(File.join(temp_dir, "doc3.txt"), "Doc3 Header\n" + ("Line of content C\n" * 250))
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc1.txt"}))
+        )
+        call2 = Mantle::Clients::ToolCall.new(
+          id: "call_2",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc2.txt"}))
+        )
+        call3 = Mantle::Clients::ToolCall.new(
+          id: "call_3",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc3.txt"}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Examined doc1", tool_calls: [call2]),
+          Mantle::Clients::Response.new(content: "Examined doc2", tool_calls: [call3]),
+          Mantle::Clients::Response.new(content: "Examined doc3, completed task.", tool_calls: nil),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Review documentation files")
+
+        result.should contain("[Subagent completed - 3 tool calls")
+        result.should contain("Examined doc3, completed task.")
+
+        recorded = client.recorded_messages.last
+        tool_doc1 = recorded.find { |m| m.role == "tool" && m.tool_call_id == "call_1" }
+        tool_doc1.should_not be_nil
+        tool_doc1.not_nil!.content.not_nil!.should contain("[... remaining output shed: was")
+      end
+    end
+
+    it "trips loop circuit breaker when subagent makes repetitive tool calls" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.loop_detect_threshold = 3
+
+        call = Mantle::Clients::ToolCall.new(
+          id: "call_repeat",
+          function: Mantle::Clients::ToolCallFunction.new(name: "list_files", arguments: %({"path":"."}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call]),
+          Mantle::Clients::Response.new(content: "Repeating", tool_calls: [call]),
+          Mantle::Clients::Response.new(content: "Repeating again", tool_calls: [call]),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("List everything repeatedly")
+
+        result.should contain("Subagent loop circuit breaker tripped:")
+      end
+    end
+
+    it "enforces spend cap during subagent execution" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.turn_spend_cap_tokens = 500
+
+        call = Mantle::Clients::ToolCall.new(
+          id: "call_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "list_files", arguments: %({"path":"."}))
+        )
+
+        resp1 = Mantle::Clients::Response.new(content: nil, tool_calls: [call])
+        resp1.eval_count = 600
+
+        resp2 = Mantle::Clients::Response.new(content: "Finished", tool_calls: nil)
+
+        client = FakeClient.new([resp1, resp2])
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Task that burns tokens")
+
+        result.should contain("[Subagent spend cap exceeded:")
+      end
+    end
+
+    it "recovers from context overflow error using emergency shedding" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.context_overflow_retries = 1
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_overflow",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"big.txt"}))
+        )
+        File.write(File.join(temp_dir, "big.txt"), "A" * 2000)
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Successfully recovered after retry", tool_calls: nil),
+        ])
+
+        client.raise_on_call[2] = Exception.new("400 Bad Request: context_length_exceeded")
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Task encountering overflow")
+
+        result.should contain("Successfully recovered after retry")
+      end
+    end
+
+    it "trips loop circuit breaker and halts in dispatch" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.loop_detect_threshold = 3
+
+        call = Mantle::Clients::ToolCall.new(
+          id: "call_repeat_dispatch",
+          function: Mantle::Clients::ToolCallFunction.new(name: "list_files", arguments: %({"path":"."}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call]),
+          Mantle::Clients::Response.new(content: "Repeating in dispatch", tool_calls: [call]),
+          Mantle::Clients::Response.new(content: "Repeating again in dispatch", tool_calls: [call]),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        item = Nightmare::Plan::PlanItem.new(id: "item-loop", title: "Repetitive task")
+        run = Nightmare::Plan::PlanRun.new(run_id: "run-1", plan_id: "test-plan")
+
+        outcome = runner.dispatch(item, run, temp_dir)
+        outcome[:status].should eq("failed")
+        outcome[:summary].should contain("Subagent loop circuit breaker tripped:")
+      end
+    end
+  end
 end

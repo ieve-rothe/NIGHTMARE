@@ -13,7 +13,12 @@ require "../tools/guard"
 require "../tools/shell"
 require "../tools/mutation"
 require "../tools/read_only"
+require "../tools/middleware"
 require "../ui/cancellation"
+require "../context/sliding_store"
+require "../context/token_calibrator"
+require "../context/shedder"
+require "./loop_detector"
 require "./types"
 require "./tool_loop"
 
@@ -79,12 +84,20 @@ module Nightmare::Harness
         {Nightmare::Tools::ApprovalOutcome::Yes, nil.as(String?)}
       }
 
+      loop_detector = Nightmare::Harness::LoopDetector.new(threshold: @environment.settings.loop_detect_threshold)
       registry = Nightmare::Tools::Registry.new(
         guard: guard,
         client: @client,
         diff_approval: diff_approval,
-        shell_approval: shell_approval
+        shell_approval: shell_approval,
+        default_command_timeout: @environment.settings.command_timeout_seconds,
+        max_command_timeout: @environment.settings.max_command_timeout_seconds,
+        tool_output_max_bytes: @environment.settings.tool_output_max_bytes
       )
+      registry.middlewares = [
+        ToolMiddleware::LoopDetector.new(loop_detector),
+        ToolMiddleware::ExceptionTrapping.new,
+      ] of ToolMiddleware::Base
       registry.set_active_side_effects(files_touched)
       registry.shell.subagent_mode = true
 
@@ -110,10 +123,18 @@ module Nightmare::Harness
       system_prompt = build_system_prompt(item, worktree_path)
       user_prompt = build_user_prompt(item)
 
-      messages = [
-        Mantle::Message.new("system", system_prompt),
-        Mantle::Message.new("user", user_prompt),
-      ]
+      store = Nightmare::Context::SlidingStore.new(hardmax: @environment.settings.token_hardmax)
+      store.start_turn(Mantle::Message.new("user", user_prompt))
+      calibrator = Nightmare::Context::TokenEstimator.new(divisor: @environment.settings.initial_divisor)
+      tool_loop = Nightmare::Harness::ToolLoop.new(
+        store: store,
+        calibrator: calibrator,
+        loop_detector: loop_detector,
+        spend_cap: @environment.settings.turn_spend_cap_tokens,
+        shed_trigger_ratio: @environment.settings.shed_trigger_ratio,
+        shed_keep_chars: @environment.settings.shed_keep_chars,
+        shed_keep_verbatim: @environment.settings.shed_keep_verbatim
+      )
 
       tool_calls_count = 0
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
@@ -128,16 +149,11 @@ module Nightmare::Harness
             p.pace_turn
           end
         end
-        working_msgs
+        tool_loop.on_iteration_hook(store).call(working_msgs, last_res)
       }
 
       max_iterations = item.budget_iterations || @environment.settings.max_iterations
-      step = Mantle::Step.new(
-        client: @client,
-        tools: wrapped_subagent_tools,
-        max_iterations: max_iterations,
-        on_iteration: on_iteration
-      )
+      overflow_retries_remaining = @environment.settings.context_overflow_retries
 
       tokens_used = 0
       summary = ""
@@ -145,33 +161,81 @@ module Nightmare::Harness
       proposed_items = [] of Nightmare::Plan::ProposedItem
       proposed_targets = [] of String
 
-      begin
-        result = step.run(messages) do |_chunk|
-          if cancelled?
+      loop do
+        messages = store.assemble_messages(system_prompt)
+        step = Mantle::Step.new(
+          client: @client,
+          tools: wrapped_subagent_tools,
+          max_iterations: max_iterations,
+          on_iteration: on_iteration
+        )
+
+        begin
+          result = step.run(messages) do |_chunk|
+            if cancelled?
+              raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+            end
+          end
+
+          if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
             raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
           end
-        end
 
-        if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
-          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
-        end
+          if resp = result.raw_response
+            tokens_used = (resp.prompt_eval_count || 0) + (resp.eval_count || 0)
+          end
+          if tool_loop.cumulative_spend > 0
+            tokens_used += tool_loop.cumulative_spend
+          end
 
-        if resp = result.raw_response
-          tokens_used = (resp.prompt_eval_count || 0) + (resp.eval_count || 0)
-        end
+          # Check for context overflow error
+          if result.err? && context_overflow_error?(result)
+            if overflow_retries_remaining > 0
+              overflow_retries_remaining -= 1
+              recover_from_context_overflow(store, calibrator)
+              next
+            else
+              status = "failed"
+              summary = "Subagent error: Context length exceeded after emergency shedding"
+              break
+            end
+          end
 
-        if result.ok?
-          raw_response = result.unwrap
-          summary, proposed_items, proposed_targets = parse_subagent_output(raw_response, item.id)
-        else
+          # Check for loop circuit breaker trip
+          if loop_detector.tripped? || (result.error == Mantle::StepError::ToolExecutionFailure && result.error_message.try(&.includes?("ERR_DEGENERATE_LOOP")))
+            status = "failed"
+            summary = "Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}"
+            break
+          end
+
+          if result.ok?
+            raw_response = result.unwrap
+            summary, proposed_items, proposed_targets = parse_subagent_output(raw_response, item.id)
+          else
+            status = "failed"
+            summary = "Subagent error: #{result.error}"
+          end
+          break
+        rescue ex : CancelledException
+          raise ex
+        rescue ex : SpendCapExceededException
           status = "failed"
-          summary = "Subagent error: #{result.error}"
+          summary = "Subagent spend cap exceeded: #{ex.message}"
+          break
+        rescue ex : Mantle::Clients::APIError
+          if ex.context_overflow? && overflow_retries_remaining > 0
+            overflow_retries_remaining -= 1
+            recover_from_context_overflow(store, calibrator)
+            next
+          end
+          status = "failed"
+          summary = "Subagent exception: #{ex.message}"
+          break
+        rescue ex
+          status = "failed"
+          summary = "Subagent exception: #{ex.message}"
+          break
         end
-      rescue ex : CancelledException
-        raise ex
-      rescue ex
-        status = "failed"
-        summary = "Subagent exception: #{ex.message}"
       end
 
       {
@@ -201,6 +265,7 @@ module Nightmare::Harness
         {Nightmare::Tools::ApprovalOutcome::Yes, nil.as(String?)}
       }
 
+      loop_detector = Nightmare::Harness::LoopDetector.new(threshold: @environment.settings.loop_detect_threshold)
       registry = Nightmare::Tools::Registry.new(
         guard: guard,
         client: @client,
@@ -210,6 +275,10 @@ module Nightmare::Harness
         max_command_timeout: @environment.settings.max_command_timeout_seconds,
         tool_output_max_bytes: @environment.settings.tool_output_max_bytes
       )
+      registry.middlewares = [
+        ToolMiddleware::LoopDetector.new(loop_detector),
+        ToolMiddleware::ExceptionTrapping.new,
+      ] of ToolMiddleware::Base
       registry.set_active_side_effects(files_touched)
       registry.shell.subagent_mode = true
 
@@ -218,10 +287,18 @@ module Nightmare::Harness
       system_prompt = build_workspace_system_prompt(files_targeted)
       user_prompt = "Task:\n#{task}\n\nExecute the task now."
 
-      messages = [
-        Mantle::Message.new("system", system_prompt),
-        Mantle::Message.new("user", user_prompt),
-      ]
+      store = Nightmare::Context::SlidingStore.new(hardmax: @environment.settings.token_hardmax)
+      store.start_turn(Mantle::Message.new("user", user_prompt))
+      calibrator = Nightmare::Context::TokenEstimator.new(divisor: @environment.settings.initial_divisor)
+      tool_loop = Nightmare::Harness::ToolLoop.new(
+        store: store,
+        calibrator: calibrator,
+        loop_detector: loop_detector,
+        spend_cap: @environment.settings.turn_spend_cap_tokens,
+        shed_trigger_ratio: @environment.settings.shed_trigger_ratio,
+        shed_keep_chars: @environment.settings.shed_keep_chars,
+        shed_keep_verbatim: @environment.settings.shed_keep_verbatim
+      )
 
       max_iterations = budget_iterations || @environment.settings.max_iterations
       telemetry = Nightmare::UI::SubagentTelemetry.new(
@@ -283,49 +360,102 @@ module Nightmare::Harness
             p.pace_turn
           end
         end
-        working_msgs
+        tool_loop.on_iteration_hook(store).call(working_msgs, last_res)
       }
 
-      step = Mantle::Step.new(
-        client: @client,
-        tools: wrapped_subagent_tools,
-        max_iterations: max_iterations,
-        on_iteration: on_iteration
-      )
+      overflow_retries_remaining = @environment.settings.context_overflow_retries
 
       begin
-        result = step.run(messages) do |_chunk|
-          if cancelled?
+        loop do
+          messages = store.assemble_messages(system_prompt)
+          step = Mantle::Step.new(
+            client: @client,
+            tools: wrapped_subagent_tools,
+            max_iterations: max_iterations,
+            on_iteration: on_iteration
+          )
+
+          result = step.run(messages) do |_chunk|
+            if cancelled?
+              raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+            end
+          end
+
+          if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
             raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
           end
-        end
 
-        if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
-          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
-        end
-
-        if result.ok?
-          raw_response = result.unwrap
-          summary, _proposed_items, _proposed_targets = parse_subagent_output(raw_response, "subagent")
-          String.build do |io|
-            io << "[Subagent completed - " << tool_calls_count << " tool call" << (tool_calls_count == 1 ? "" : "s")
-            unless files_touched.empty?
-              io << ", files modified: " << files_touched.uniq.join(", ")
+          # Check for context overflow error
+          if result.err? && context_overflow_error?(result)
+            if overflow_retries_remaining > 0
+              overflow_retries_remaining -= 1
+              recover_from_context_overflow(store, calibrator)
+              next
+            else
+              return "[Subagent error: Context length exceeded after emergency shedding]"
             end
-            io << "]\n\n"
-            io << summary
           end
-        else
-          "[Subagent error: #{result.error}]"
+
+          # Check for loop circuit breaker trip
+          if loop_detector.tripped? || (result.error == Mantle::StepError::ToolExecutionFailure && result.error_message.try(&.includes?("ERR_DEGENERATE_LOOP")))
+            return "[Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}]"
+          end
+
+          if result.ok?
+            raw_response = result.unwrap
+            summary, _proposed_items, _proposed_targets = parse_subagent_output(raw_response, "subagent")
+            return String.build do |io|
+              io << "[Subagent completed - " << tool_calls_count << " tool call" << (tool_calls_count == 1 ? "" : "s")
+              unless files_touched.empty?
+                io << ", files modified: " << files_touched.uniq.join(", ")
+              end
+              io << "]\n\n"
+              io << summary
+            end
+          else
+            return "[Subagent error: #{result.error}]"
+          end
         end
       rescue ex : CancelledException
         raise ex
+      rescue ex : SpendCapExceededException
+        "[Subagent spend cap exceeded: #{ex.message}]"
+      rescue ex : Mantle::Clients::APIError
+        "[Subagent API error: #{ex.message}]"
       rescue ex
         "[Subagent exception: #{ex.message}]"
       ensure
         if tp
           tp.active_subagent = nil
         end
+      end
+    end
+
+    private def context_overflow_error?(result : Mantle::StepResult(String, Mantle::StepError)) : Bool
+      return false unless result.err?
+      if raw = result.raw_response
+        return true if raw.truncated?
+      end
+      if msg = result.error_message
+        return true if msg.includes?("context_length_exceeded") || msg.includes?("maximum context length")
+      end
+      false
+    end
+
+    private def recover_from_context_overflow(store : Context::SlidingStore, calibrator : Context::TokenEstimator) : Nil
+      hardmax = store.hardmax
+      current_tokens = hardmax + 1000
+
+      if active = store.active_turn
+        Context::Shedder.shed_active_turn!(
+          active,
+          current_tokens: current_tokens,
+          hardmax: hardmax,
+          trigger_ratio: 0.5,
+          keep_chars: 50,
+          keep_verbatim: 1,
+          calibrator: calibrator
+        )
       end
     end
 
