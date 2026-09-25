@@ -9,11 +9,13 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-002](notes/pm/TKT-002-kv-cache-utilization-metrics.md) | KV Cache Capacity and Utilization Metrics (Tokens and Memory) | Observability & Resource Management | Open | Med | 2026-09-11 |
 | [TKT-012](notes/pm/TKT-012-response-markdown-boundary-and-scrollback-delineation.md) | Visual Delineation and Response Boundary for Markdown REPL Output | User Interface & Tooling | Resolved | Med | 2026-09-18 |
 | [TKT-013](notes/pm/TKT-013-slash-command-sidechannel-llm-turn.md) | Slash Command for Sidechannel LLM Turn (Dispatch Recipes) | Tooling & Automation | Open | Med | 2024-05-22 |
+| [TKT-016](notes/pm/TKT-016-integrate-websearch-tool-into-nightmare-registry.md) | Integrate WebSearch Tool into Nightmare Registry | Tooling & Automation | Open | Med | 2026-09-25 |
 
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-017](notes/pm/closed/TKT-017-inject-ephemeral-current-date-into-context.md) | Inject Ephemeral Current Date into Context Assembly | Context & Prompt Engineering | Closed | Med | 2026-09-25 |
 | [TKT-015](notes/pm/closed/TKT-015-consecutive-loop-detection-and-mutation-reset.md) | Refine LoopDetector to Track Consecutive Repetition and Invalidate on Workspace Mutation | Harness Stability & Tool Ergonomics | Closed | High | 2026-09-24 |
 | [TKT-011](notes/pm/closed/TKT-011-shell-pipeline-execution-and-exact-allowlisting.md) | Shell Pipeline Execution, Exact Allowlisting, and Modal Display | Tool Ergonomics & Execution Security | Closed | High | 2026-09-17 |
 | [TKT-005](notes/pm/TKT-005-integration-testing-restructure-and-core-workflows.md) | Restructure Integration Testing Suite and Implement Human-Readable Core Workflows | Testing & Verification Architecture | Closed | High | 2026-09-17 |

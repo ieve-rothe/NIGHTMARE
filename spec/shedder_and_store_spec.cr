@@ -182,7 +182,7 @@ describe "Shedder and SlidingStore Context Engine" do
       msgs[3].content.should eq("Q2")
     end
 
-    it "assembles wire format in strict order: system prompt -> active skill -> pinned files -> history -> active" do
+    it "assembles wire format in strict order: system prompt -> ephemeral date -> active skill -> pinned files -> history -> active" do
       store = Nightmare::Context::SlidingStore.new
 
       h1 = store.start_turn("Q1")
@@ -200,11 +200,22 @@ describe "Shedder and SlidingStore Context Engine" do
       msgs[0].role.should eq("system")
       content = msgs[0].content.not_nil!
       prompt_idx = content.index("Harness System Prompt").not_nil!
+      date_str = Nightmare::Context::SlidingStore.current_date_note
+      content.should contain(date_str)
+      date_idx = content.index(date_str).not_nil!
       skill_idx = content.index("=== ACTIVE SKILL: mail_sorter_v2 (global) ===").not_nil!
       pinned_idx = content.index("=== PINNED FILE: code.cr ===").not_nil!
 
-      (prompt_idx < skill_idx).should be_true
+      (prompt_idx < date_idx).should be_true
+      (date_idx < skill_idx).should be_true
       (skill_idx < pinned_idx).should be_true
+    end
+
+    it "injects ephemeral date even when system prompt is nil" do
+      store = Nightmare::Context::SlidingStore.new
+      msgs = store.assemble_messages(system_prompt: nil)
+      msgs[0].role.should eq("system")
+      msgs[0].content.not_nil!.should eq(Nightmare::Context::SlidingStore.current_date_note)
     end
   end
 end

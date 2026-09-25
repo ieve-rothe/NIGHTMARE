@@ -78,17 +78,23 @@ module Nightmare::Context
       active
     end
 
+    def self.current_date_note : String
+      "Today's date: #{Time.local.to_s("%Y-%m-%d")}"
+    end
+
     # Assembles wire-format messages in strict order:
     # 1. System prompt
-    # 2. Active skill block
-    # 3. Pinned files block
-    # 4. Completed historical turns splatted in order
-    # 5. Active in-flight turn messages
+    # 2. Ephemeral current date note
+    # 3. Active skill block
+    # 4. Pinned files block
+    # 5. Completed historical turns splatted in order
+    # 6. Active in-flight turn messages
     def assemble_messages(system_prompt : String? = nil, pinned_block : String? = nil, skill_block : String? = nil) : Array(Mantle::Message)
       result = [] of Mantle::Message
 
       system_parts = [] of String
       system_parts << system_prompt if system_prompt && !system_prompt.empty?
+      system_parts << SlidingStore.current_date_note
       system_parts << skill_block if skill_block && !skill_block.empty?
       system_parts << pinned_block if pinned_block && !pinned_block.empty?
 

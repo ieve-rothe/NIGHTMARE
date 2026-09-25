@@ -331,6 +331,10 @@ HELP
       puts @current_prompt
       puts
 
+      puts "--- Ephemeral Context ---"
+      puts Context::SlidingStore.current_date_note
+      puts
+
       skill_block = @skills_manager.active_skill.try(&.formatted_block)
       if skill = @skills_manager.active_skill
         puts "--- Active Skill (#{skill.name} [#{skill.scope}]) ---"
