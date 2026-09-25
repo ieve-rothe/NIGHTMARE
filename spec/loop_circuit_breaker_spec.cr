@@ -33,6 +33,51 @@ describe "Loop Detector Hard Circuit Breaker & CAPA Failure Dump (TKT-008)" do
       detector.tripped_tool.should eq("read_file")
       detector.last_refusal.not_nil!.should contain("ERR_DEGENERATE_LOOP")
     end
+
+    it "does not trip when identical tool calls are interleaved with different tools (TKT-015)" do
+      detector = Nightmare::Harness::LoopDetector.new(threshold: 3)
+      middleware = ToolMiddleware::LoopDetector.new(detector)
+
+      dummy_handler = ->(args : Hash(String, JSON::Any)) { "executed successfully" }
+      cmd_args = {"command" => JSON::Any.new("crystal test_compile.cr")}
+      edit_args = {"path" => JSON::Any.new("src/code.cr"), "replacement" => JSON::Any.new("fixed")}
+
+      # Simulate edit-test cycle repeated 5 times (exceeding threshold of 3 if cumulative)
+      5.times do |i|
+        res_cmd = middleware.call("run_command", cmd_args, dummy_handler)
+        res_cmd.should eq("executed successfully")
+        detector.tripped?.should be_false
+
+        res_edit = middleware.call("replace_in_file", edit_args, dummy_handler)
+        res_edit.should eq("executed successfully")
+        detector.tripped?.should be_false
+      end
+
+      # One more run_command (6th total call)
+      res_final = middleware.call("run_command", cmd_args, dummy_handler)
+      res_final.should eq("executed successfully")
+      detector.tripped?.should be_false
+    end
+
+    it "resets consecutive counter when tool arguments change" do
+      detector = Nightmare::Harness::LoopDetector.new(threshold: 3)
+      middleware = ToolMiddleware::LoopDetector.new(detector)
+
+      dummy_handler = ->(args : Hash(String, JSON::Any)) { "executed successfully" }
+
+      # 2 calls with arg1
+      middleware.call("run_command", {"command" => JSON::Any.new("crystal spec spec/a_spec.cr")}, dummy_handler)
+      middleware.call("run_command", {"command" => JSON::Any.new("crystal spec spec/a_spec.cr")}, dummy_handler)
+      detector.tripped?.should be_false
+
+      # 1 call with arg2 (different args, resets consecutive counter)
+      middleware.call("run_command", {"command" => JSON::Any.new("crystal spec spec/b_spec.cr")}, dummy_handler)
+      detector.tripped?.should be_false
+
+      # Another call with arg1 (should be count = 1, not count = 3)
+      middleware.call("run_command", {"command" => JSON::Any.new("crystal spec spec/a_spec.cr")}, dummy_handler)
+      detector.tripped?.should be_false
+    end
   end
 
   describe "StepRunner Circuit Breaker & Failure State Dump" do
