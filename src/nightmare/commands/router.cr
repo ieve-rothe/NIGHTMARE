@@ -108,6 +108,9 @@ module Nightmare::Commands
       when "/review"
         handle_review
         {true, nil}
+      when "/recover"
+        handle_recover(args)
+        {true, nil}
       when "/thinking"
         handle_thinking
         {true, nil}
@@ -167,6 +170,7 @@ Available Slash Commands:
   /prompt [edit]   View or edit in-memory system prompt
   /skill [name]    Toggle, switch, or list task skills (/skill off)
   /review          Inspect assembled prompt, pinned files, and token usage
+  /recover [opt]   Inspect and restore context from failure/crash dumps
   /thinking        View model internal chain-of-thought from last turn
   /theme [name]    Switch theme (cyberpunk, outrun, phosphor, classic)
   /model [name]    Inspect or change the active LLM model
@@ -377,6 +381,288 @@ HELP
       puts "  Pinned files:  ~#{pinned_tokens} tokens"
       puts "  Calibrator divisor: #{@calibrator.divisor.round(2)}"
       puts "=====================\n"
+    end
+
+    private def handle_recover(args : String) : Nil
+      candidates = [
+        File.join(@env.workspace_state_dir, "failures"),
+        File.join(@env.root, ".nightmare", "failures"),
+        File.join(Dir.current, ".nightmare", "failures")
+      ].uniq
+
+      failures_dir = candidates.find { |d| Dir.exists?(d) && !Dir.children(d).empty? } || candidates.first
+
+      parts = args.strip.split(' ', 2)
+      subcmd = parts.first?.try(&.downcase) || ""
+      target_arg = parts.size > 1 ? parts[1].strip : ""
+
+      if !subcmd.empty? && subcmd != "list" && subcmd != "view" && subcmd != "restore"
+        if File.exists?(subcmd)
+          view_dump_details(subcmd)
+          return
+        elsif subcmd.to_i?
+          target_arg = subcmd
+          subcmd = "view"
+        end
+      end
+
+      dump_files = if Dir.exists?(failures_dir)
+        Dir.children(failures_dir)
+          .select { |f| f.starts_with?("failure_") && f.ends_with?(".json") }
+          .sort
+          .reverse
+      else
+        [] of String
+      end
+
+      case subcmd
+      when "", "list"
+        if dump_files.empty?
+          puts "No failure dumps found in #{failures_dir}."
+          return
+        end
+
+        puts "\n=== Recent Failure Dumps ==="
+        dump_files.first(10).each_with_index do |filename, idx|
+          filepath = File.join(failures_dir, filename)
+          info = parse_dump_summary(filepath)
+          marker = (idx == 0) ? "● (latest)" : "○"
+          puts "  #{marker} [#{idx + 1}] #{filename}"
+          puts "      Time: #{info[:time]} | Error: #{info[:error_code]} | Tool: #{info[:tool]} | Tokens: ~#{info[:tokens]}"
+        end
+        puts "\nUsage:"
+        puts "  /recover view [index|file]    - Inspect details of a failure dump"
+        puts "  /recover restore [index|file] - Restore dump into active conversation history\n"
+
+      when "view"
+        target_file = resolve_dump_file(target_arg.empty? ? "1" : target_arg, dump_files, failures_dir)
+        unless target_file
+          puts "Failure dump not found: '#{target_arg}'"
+          return
+        end
+        view_dump_details(target_file)
+
+      when "restore"
+        target_file = resolve_dump_file(target_arg.empty? ? "1" : target_arg, dump_files, failures_dir)
+        unless target_file
+          puts "Failure dump not found: '#{target_arg}'"
+          return
+        end
+        restore_dump(target_file)
+
+      else
+        puts "Unknown option '#{subcmd}'. Run /recover to list dumps or /recover restore [index]."
+      end
+    end
+
+    private def resolve_dump_file(target : String, dump_files : Array(String), failures_dir : String) : String?
+      return target if File.exists?(target)
+
+      if File.exists?(File.join(failures_dir, target))
+        return File.join(failures_dir, target)
+      end
+
+      if idx = target.to_i?
+        if idx >= 1 && idx <= dump_files.size
+          return File.join(failures_dir, dump_files[idx - 1])
+        end
+      end
+
+      if match = dump_files.find { |f| f.includes?(target) }
+        return File.join(failures_dir, match)
+      end
+
+      nil
+    end
+
+    private def parse_dump_summary(filepath : String) : NamedTuple(time: String, error_code: String, tool: String, tokens: Int32)
+      begin
+        data = JSON.parse(File.read(filepath))
+        time = data["timestamp"]?.try(&.as_s?) || "unknown"
+        error_code = data["error_code"]?.try(&.as_s?) || "UNKNOWN"
+        tool = data["offending_tool"]?.try(&.as_s?) || "none"
+        tokens = data["token_metrics"]?.try(&.[]?("prompt_tokens")).try(&.as_i?) || 0
+        {time: time, error_code: error_code, tool: tool, tokens: tokens}
+      rescue
+        {time: "corrupt", error_code: "PARSE_ERROR", tool: "unknown", tokens: 0}
+      end
+    end
+
+    private def view_dump_details(filepath : String) : Nil
+      data = begin
+        JSON.parse(File.read(filepath))
+      rescue ex
+        puts "Failed to parse dump #{filepath}: #{ex.message}"
+        return
+      end
+
+      error_code = data["error_code"]?.try(&.as_s?) || "UNKNOWN"
+      message = data["message"]?.try(&.as_s?) || ""
+      tool = data["offending_tool"]?.try(&.as_s?) || "none"
+      time = data["timestamp"]?.try(&.as_s?) || ""
+      iter = data["token_metrics"]?.try(&.[]?("iterations")).try(&.as_i?) || 0
+      tokens = data["token_metrics"]?.try(&.[]?("prompt_tokens")).try(&.as_i?) || 0
+      msgs = data["messages"]?.try(&.as_a?) || [] of JSON::Any
+
+      first_user = msgs.find { |m| m["role"]?.try(&.as_s?) == "user" }
+      first_prompt = first_user.try(&.[]?("content")).try(&.as_s?) || "(none)"
+
+      tool_calls_list = [] of String
+      msgs.each do |m|
+        if tcs = m["tool_calls"]?.try(&.as_a?)
+          tcs.each do |tc|
+            name = tc["name"]?.try(&.as_s?) || "unknown"
+            tool_calls_list << name
+          end
+        end
+      end
+
+      puts "\n=== Failure Dump: #{File.basename(filepath)} ==="
+      puts "Timestamp: #{time}"
+      puts "Error:     #{error_code} - #{message}"
+      puts "Tool:      #{tool}"
+      puts "Metrics:   #{iter} iterations | ~#{tokens} tokens | #{msgs.size} messages"
+      puts "\nOriginal Request:"
+      puts "  #{first_prompt.lines.first(3).join("\n  ")}#{"..." if first_prompt.lines.size > 3}"
+      if !tool_calls_list.empty?
+        puts "\nTools Executed: #{tool_calls_list.uniq.join(", ")} (total #{tool_calls_list.size} calls)"
+      end
+      puts "\nTo restore this dump into active conversation history, run:"
+      puts "  /recover restore #{File.basename(filepath)}"
+      puts "=================================================\n"
+    end
+
+    private def restore_dump(filepath : String) : Nil
+      data = begin
+        JSON.parse(File.read(filepath))
+      rescue ex
+        puts "Failed to parse dump #{filepath}: #{ex.message}"
+        return
+      end
+
+      messages_json = data["messages"]?.try(&.as_a?) || [] of JSON::Any
+      if messages_json.empty?
+        puts "No messages found in failure dump #{filepath}."
+        return
+      end
+
+      msgs = [] of Mantle::Message
+      pending_tool_calls = [] of Mantle::Clients::ToolCall
+
+      messages_json.each do |mj|
+        role = mj["role"]?.try(&.as_s?) || "user"
+        content = mj["content"]?.try(&.as_s?)
+
+        tool_calls = mj["tool_calls"]?.try(&.as_a?).try do |tcs_json|
+          tcs_json.map do |tc_json|
+            Mantle::Clients::ToolCall.new(
+              id: tc_json["id"]?.try(&.as_s?) || "call_#{Random::Secure.hex(4)}",
+              type: "function",
+              function: Mantle::Clients::ToolCallFunction.new(
+                name: tc_json["name"]?.try(&.as_s?) || "unknown",
+                arguments: tc_json["arguments"]?.try(&.as_s?) || "{}"
+              )
+            )
+          end
+        end
+
+        raw_tool_id = mj["tool_call_id"]?.try(&.as_s?)
+        tool_call_id = if role == "tool" && (raw_tool_id.nil? || raw_tool_id.empty?)
+          pending_tool_calls.shift?.try(&.id) || "call_recovered_#{Random::Secure.hex(4)}"
+        else
+          raw_tool_id
+        end
+
+        if role == "assistant" && tool_calls
+          pending_tool_calls.concat(tool_calls)
+        end
+
+        msgs << Mantle::Message.new(
+          role: role,
+          content: content,
+          tool_calls: tool_calls,
+          tool_call_id: tool_call_id
+        )
+      end
+
+      # Ensure starts with user
+      if msgs.first?.try(&.role) != "user"
+        msgs.unshift(Mantle::Message.new("user", "Recovered session request"))
+      end
+
+      # Disambiguate duplicate tool_call IDs if any
+      seen_ids = Set(String).new
+      msgs.each_with_index do |m, idx|
+        if m.role == "assistant" && (tcs = m.tool_calls)
+          tcs.each_with_index do |tc, tc_idx|
+            if seen_ids.includes?(tc.id)
+              new_id = "#{tc.id}_dup#{idx}_#{tc_idx}"
+              ((idx + 1)...msgs.size).each do |tm_idx|
+                tm = msgs[tm_idx]
+                if tm.role == "tool" && tm.tool_call_id == tc.id
+                  msgs[tm_idx] = Mantle::Message.new(
+                    role: "tool",
+                    content: tm.content,
+                    tool_calls: tm.tool_calls,
+                    tool_call_id: new_id
+                  )
+                  break
+                end
+              end
+              tcs[tc_idx] = Mantle::Clients::ToolCall.new(new_id, tc.function, tc.type)
+              seen_ids.add(new_id)
+            else
+              seen_ids.add(tc.id)
+            end
+          end
+        end
+      end
+
+      # Close any open tool calls
+      open_ids = Set(String).new
+      msgs.each_with_index do |m, idx|
+        next if idx == 0
+        if m.role == "assistant" && (tcs = m.tool_calls)
+          tcs.each { |tc| open_ids.add(tc.id) }
+        elsif m.role == "tool" && (tid = m.tool_call_id)
+          open_ids.delete(tid)
+        end
+      end
+
+      open_ids.each do |unclosed_id|
+        msgs << Mantle::Message.new(
+          role: "tool",
+          content: %({"error": "Aborted before result was recorded", "refused": true}),
+          tool_call_id: unclosed_id
+        )
+      end
+
+      # Ensure terminates with assistant
+      if msgs.last?.try(&.role) != "assistant"
+        err_code = data["error_code"]?.try(&.as_s?) || "ERR_ABORTED"
+        err_msg = data["message"]?.try(&.as_s?) || "Turn interrupted"
+        msgs << Mantle::Message.new("assistant", "Recovered from failure dump (#{err_code}): #{err_msg}")
+      end
+
+      turn = Context::Turn.from_messages(msgs)
+
+      # In-turn shed if over budget
+      total_chars = turn.messages.sum { |m| (m.content || "").size }
+      estimated_toks = @calibrator.estimate(total_chars)
+      hardmax = @store.hardmax
+      trigger_thold = (hardmax.to_f * 0.75).to_i
+      if estimated_toks > trigger_thold
+        estimated_toks = Context::Shedder.shed_active_turn!(
+          turn,
+          current_tokens: estimated_toks,
+          hardmax: hardmax,
+          calibrator: @calibrator
+        )
+      end
+
+      @store.push_turn(turn)
+      puts "Successfully restored turn from #{File.basename(filepath)} into conversation history (~#{estimated_toks} tokens)."
+      puts "Type /review to inspect context."
     end
 
     private def handle_thinking : Nil

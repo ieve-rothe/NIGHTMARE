@@ -410,5 +410,106 @@ describe Nightmare::Commands::Router do
         FileUtils.rm_rf(temp_dir)
       end
     end
+
+    it "lists, views, and restores failure dumps with /recover (TKT-022)" do
+      temp_dir = File.tempname("router_recover_test")
+      failures_dir = File.join(temp_dir, ".nightmare", "failures")
+      Dir.mkdir_p(failures_dir)
+
+      begin
+        dump_data = {
+          "timestamp" => "2026-09-25T19:19:17Z",
+          "error_code" => "ERR_DEGENERATE_LOOP",
+          "message" => "ERR_DEGENERATE_LOOP: identical call to list_files repeated 5 times.",
+          "offending_tool" => "list_files",
+          "arguments" => {"path" => "old/smc_docs"},
+          "messages" => [
+            {
+              "role" => "user",
+              "content" => "Organize our docs into canonical vs workspaces",
+              "tool_calls" => nil,
+              "tool_call_id" => nil
+            },
+            {
+              "role" => "assistant",
+              "content" => "I will explore the docs first",
+              "tool_calls" => [
+                {"id" => "call_1", "name" => "list_files", "arguments" => "{\"path\":\"old/\"}"}
+              ],
+              "tool_call_id" => nil
+            },
+            {
+              "role" => "tool",
+              "content" => "old/doc1.md\nold/doc2.md",
+              "tool_calls" => nil,
+              "tool_call_id" => "call_1"
+            },
+            {
+              "role" => "assistant",
+              "content" => "Checking smc_docs",
+              "tool_calls" => [
+                {"id" => "call_2", "name" => "list_files", "arguments" => "{\"path\":\"old/smc_docs\"}"}
+              ],
+              "tool_call_id" => nil
+            }
+          ],
+          "token_metrics" => {
+            "iterations" => 5,
+            "prompt_tokens" => 3500
+          }
+        }
+
+        filename = "failure_20260925_191917_000_test1234.json"
+        File.write(File.join(failures_dir, filename), dump_data.to_json)
+
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        stdout = IO::Memory.new
+        store = Nightmare::Context::SlidingStore.new
+        router = Nightmare::Commands::Router.new(
+          store: store,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(temp_dir, enabled: false),
+          current_prompt: "Base system prompt",
+          current_model: "test-model",
+          stdout: stdout
+        )
+
+        # 1. /recover list
+        stdout.clear
+        router.handle("/recover")
+        stdout.to_s.should contain("Recent Failure Dumps")
+        stdout.to_s.should contain(filename)
+        stdout.to_s.should contain("ERR_DEGENERATE_LOOP")
+
+        # 2. /recover view
+        stdout.clear
+        router.handle("/recover view 1")
+        stdout.to_s.should contain("Organize our docs into canonical vs workspaces")
+        stdout.to_s.should contain("list_files")
+
+        # 3. /recover restore
+        store.history.size.should eq(0)
+        stdout.clear
+        router.handle("/recover restore 1")
+        stdout.to_s.should contain("Successfully restored turn")
+        store.history.size.should eq(1)
+
+        restored_turn = store.history.first
+        restored_turn.well_formed?.should be_true
+        restored_turn.user_message.content.should eq("Organize our docs into canonical vs workspaces")
+        restored_turn.last_assistant_text.not_nil!.should contain("ERR_DEGENERATE_LOOP")
+
+        # 4. /review includes restored content
+        stdout.clear
+        router.handle("/review")
+        stdout.to_s.should contain("Organize our docs into canonical vs workspaces")
+        stdout.to_s.should contain("Conversation History (1 turns)")
+      ensure
+        FileUtils.rm_rf(temp_dir)
+      end
+    end
   end
 end

@@ -223,7 +223,8 @@ module Nightmare::Harness
           msg: msg,
           thinking: result.thinking,
           iterations: result.iterations,
-          prompt_tokens: result.raw_response.try(&.prompt_eval_count)
+          prompt_tokens: result.raw_response.try(&.prompt_eval_count),
+          raw_response: result.raw_response
         )
       end
 
@@ -360,9 +361,11 @@ module Nightmare::Harness
       msg : String,
       thinking : String? = nil,
       iterations : Int32 = 0,
-      prompt_tokens : Int32? = nil
+      prompt_tokens : Int32? = nil,
+      raw_response : Mantle::Clients::Response? = nil
     ) : TurnOutcome
       dump_failure_report(store, tool_name, args_json, msg, iterations, prompt_tokens)
+      salvage_circuit_breaker_turn(store, tool_name, args_json, msg, raw_response)
 
       TurnOutcome.failure(
         StepError.new(StepErrorKind::DegenerateLoopCircuitBreaker, msg, retryable: false),
@@ -370,6 +373,155 @@ module Nightmare::Harness
         iterations: iterations,
         prompt_tokens: prompt_tokens
       )
+    end
+
+    private def salvage_circuit_breaker_turn(
+      store : Context::SlidingStore,
+      tool_name : String,
+      args_json : String,
+      msg : String,
+      raw_response : Mantle::Clients::Response? = nil
+    ) : Nil
+      return unless active = store.active_turn
+
+      # If the last response contained tool calls that weren't yet synced into active.messages,
+      # ensure the assistant message declaring the tool call is appended.
+      if resp = raw_response
+        if tcs = resp.tool_calls
+          already_present = active.messages.last?.try do |last_m|
+            last_m.role == "assistant" && last_m.tool_calls.try(&.any? { |tc| tc.function.name == tool_name })
+          end
+          unless already_present
+            active.append_assistant(Mantle::Message.new(
+              role: "assistant",
+              content: resp.content,
+              tool_calls: tcs
+            ))
+          end
+        end
+      end
+
+      # If active still doesn't end with an open tool call, ensure an assistant message with this call exists
+      calls_dec = Set(String).new
+      active.messages.each do |m|
+        if m.role == "assistant" && (tcs = m.tool_calls)
+          tcs.each { |tc| calls_dec.add(tc.id) }
+        elsif m.role == "tool" && (tid = m.tool_call_id)
+          calls_dec.delete(tid)
+        end
+      end
+      if calls_dec.empty?
+        synth_id = "call_loop_#{Random::Secure.hex(4)}"
+        active.append_assistant(Mantle::Message.new(
+          role: "assistant",
+          content: nil,
+          tool_calls: [
+            Mantle::Clients::ToolCall.new(
+              id: synth_id,
+              type: "function",
+              function: Mantle::Clients::ToolCallFunction.new(name: tool_name, arguments: args_json)
+            )
+          ]
+        ))
+      end
+
+      # 0. Disambiguate duplicate tool_call IDs if any exist
+      seen_ids = Set(String).new
+      active.messages.each_with_index do |m, idx|
+        if m.role == "assistant" && (tcs = m.tool_calls)
+          tcs.each_with_index do |tc, tc_idx|
+            if seen_ids.includes?(tc.id)
+              new_id = "#{tc.id}_dup#{idx}_#{tc_idx}"
+              ((idx + 1)...active.messages.size).each do |tm_idx|
+                tm = active.messages[tm_idx]
+                if tm.role == "tool" && tm.tool_call_id == tc.id
+                  active.messages[tm_idx] = Mantle::Message.new(
+                    role: "tool",
+                    content: tm.content,
+                    tool_calls: tm.tool_calls,
+                    tool_call_id: new_id
+                  )
+                  break
+                end
+              end
+              tcs[tc_idx] = Mantle::Clients::ToolCall.new(new_id, tc.function, tc.type)
+              seen_ids.add(new_id)
+            else
+              seen_ids.add(tc.id)
+            end
+          end
+        end
+      end
+
+      # 1. Close any open tool calls with a synthetic loop error message
+      open_calls = Set(String).new
+      active.messages.each_with_index do |m, idx|
+        next if idx == 0
+        if m.role == "assistant"
+          if tcs = m.tool_calls
+            tcs.each { |tc| open_calls.add(tc.id) }
+          end
+        elsif m.role == "tool"
+          if tid = m.tool_call_id
+            open_calls.delete(tid)
+          end
+        end
+      end
+
+      open_calls.each do |unclosed_id|
+        active.messages << Mantle::Message.new(
+          role: "tool",
+          content: %({"error":"#{msg}","refused":true}),
+          tool_call_id: unclosed_id
+        )
+      end
+
+      # 2. Append terminal assistant message explaining the halt
+      halting_text = "Execution halted by loop circuit breaker: #{msg}. Repeated call to '#{tool_name}' was aborted to prevent infinite loop and context exhaustion."
+      active.append_assistant(Mantle::Message.new("assistant", halting_text))
+
+      # 3. Record all turn messages in transcript
+      if tr = @transcript
+        active.messages[1..].each do |m|
+          if m.role == "tool"
+            ex = active.exchanges.find { |e| e.call.id == m.tool_call_id }
+            if ex && ex.shed?
+              tr.record(Mantle::Message.new("tool", ex.original_content, tool_call_id: m.tool_call_id))
+            else
+              tr.record(m)
+            end
+          else
+            tr.record(m)
+          end
+        end
+      end
+
+      # 4. Check if turn exceeded shed trigger threshold
+      hardmax = store.hardmax
+      trigger_threshold = (hardmax.to_f * @tool_loop.shed_trigger_ratio).to_i
+      total_chars = active.messages.sum { |m| (m.content || "").size }
+      estimated = if pt = @tool_loop.last_prompt_tokens
+        pt + @tool_loop.calibrator.estimate(total_chars)
+      else
+        @tool_loop.calibrator.estimate(total_chars)
+      end
+
+      if estimated > trigger_threshold
+        Context::Shedder.shed_active_turn!(
+          active,
+          current_tokens: estimated,
+          hardmax: hardmax,
+          trigger_ratio: @tool_loop.shed_trigger_ratio,
+          keep_chars: @tool_loop.shed_keep_chars,
+          keep_verbatim: @tool_loop.shed_keep_verbatim,
+          calibrator: @tool_loop.calibrator
+        )
+      end
+
+      # 5. Commit turn to history if well-formed
+      if active.well_formed?
+        store.commit_turn
+      end
     end
 
     private def dump_failure_report(
@@ -395,7 +547,8 @@ module Nightmare::Harness
           {
             "role" => m.role,
             "content" => m.content,
-            "tool_calls" => m.tool_calls.try(&.map { |tc| {"id" => tc.id, "name" => tc.function.name, "arguments" => tc.function.arguments} })
+            "tool_calls" => m.tool_calls.try(&.map { |tc| {"id" => tc.id, "name" => tc.function.name, "arguments" => tc.function.arguments} }),
+            "tool_call_id" => m.tool_call_id
           }
         end
 

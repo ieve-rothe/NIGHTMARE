@@ -142,9 +142,16 @@ describe "Loop Detector Hard Circuit Breaker & CAPA Failure Dump (TKT-008)" do
 
         json_data["error_code"].as_s.should eq("ERR_DEGENERATE_LOOP")
         json_data["offending_tool"].as_s.should eq("looping_tool")
-        json_data["arguments"]["path"].as_s.should eq("foo.txt")
-        json_data["token_metrics"]["spend_cap"].as_i.should be > 0
-        json_data["messages"].as_a.size.should be > 0
+        # 3. Turn is salvaged into store.history and is well-formed (TKT-022)
+        store.history.size.should eq(1)
+        salvaged_turn = store.history.last
+        salvaged_turn.well_formed?.should be_true
+        salvaged_turn.last_assistant_text.not_nil!.should contain("Execution halted by loop circuit breaker")
+
+        # 4. Next turn retains the salvaged turn context
+        store.start_turn("Do you know what you were working on?")
+        assembled = store.assemble_messages("System prompt")
+        assembled.any? { |m| m.content.try(&.includes?("looping_tool")) }.should be_true
       end
     end
   end

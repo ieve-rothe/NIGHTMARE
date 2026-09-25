@@ -24,7 +24,14 @@ module Nightmare::Context
 
     # Starts a new active turn from a user message.
     # If a prior turn was interrupted with side effects, prepends an advisory note.
+    # If an existing uncommitted active turn has progress (>1 message), it is sealed and pushed to history.
     def start_turn(user_message : Mantle::Message) : Turn
+      if prior = @active_turn
+        if prior.messages.size > 1
+          salvage_uncommitted_turn(prior)
+        end
+      end
+
       msg = user_message
       if !@pending_side_effects.empty?
         note = "[Previous turn was interrupted after modifying: #{@pending_side_effects.join(", ")}]\n\n"
@@ -41,6 +48,18 @@ module Nightmare::Context
     # Starts an active turn directly from raw string prompt
     def start_turn(prompt : String) : Turn
       start_turn(Mantle::Message.new("user", prompt))
+    end
+
+    # Pushes an arbitrary completed well-formed turn into history and applies FIFO soft-cap eviction
+    def push_turn(turn : Turn) : Nil
+      unless turn.well_formed?
+        raise Nightmare::Error.new("Cannot push malformed turn: unpaired tool calls or results")
+      end
+
+      @history << turn
+      while @history.size > @soft_cap
+        @history.shift
+      end
     end
 
     # Commits the active turn to completed history and applies FIFO soft-cap eviction.
@@ -61,6 +80,71 @@ module Nightmare::Context
       end
 
       active
+    end
+
+    # Seals any unfulfilled tool calls in an uncommitted turn and commits it to history
+    private def salvage_uncommitted_turn(turn : Turn) : Nil
+      # 0. Disambiguate duplicate tool_call IDs if any exist
+      seen_ids = Set(String).new
+      turn.messages.each_with_index do |m, idx|
+        if m.role == "assistant" && (tcs = m.tool_calls)
+          tcs.each_with_index do |tc, tc_idx|
+            if seen_ids.includes?(tc.id)
+              new_id = "#{tc.id}_dup#{idx}_#{tc_idx}"
+              ((idx + 1)...turn.messages.size).each do |tm_idx|
+                tm = turn.messages[tm_idx]
+                if tm.role == "tool" && tm.tool_call_id == tc.id
+                  turn.messages[tm_idx] = Mantle::Message.new(
+                    role: "tool",
+                    content: tm.content,
+                    tool_calls: tm.tool_calls,
+                    tool_call_id: new_id
+                  )
+                  break
+                end
+              end
+              tcs[tc_idx] = Mantle::Clients::ToolCall.new(new_id, tc.function, tc.type)
+              seen_ids.add(new_id)
+            else
+              seen_ids.add(tc.id)
+            end
+          end
+        end
+      end
+
+      open_calls = Set(String).new
+      turn.messages.each_with_index do |m, idx|
+        next if idx == 0
+        if m.role == "assistant"
+          if tcs = m.tool_calls
+            tcs.each { |tc| open_calls.add(tc.id) }
+          end
+        elsif m.role == "tool"
+          if tid = m.tool_call_id
+            open_calls.delete(tid)
+          end
+        end
+      end
+
+      open_calls.each do |unclosed_id|
+        turn.messages << Mantle::Message.new(
+          role: "tool",
+          content: %({"error": "Turn ended abruptly before tool result was recorded", "refused": true}),
+          tool_call_id: unclosed_id
+        )
+      end
+
+      if turn.messages.last?.try(&.role) != "assistant"
+        turn.append_assistant(Mantle::Message.new(
+          "assistant",
+          "Turn execution ended abruptly or was superseded by operator."
+        ))
+      end
+
+      if turn.well_formed?
+        push_turn(turn)
+      end
+      @active_turn = nil
     end
 
     # Cancels and rolls back the active turn, preserving any mutated side-effect paths.
