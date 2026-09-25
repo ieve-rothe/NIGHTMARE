@@ -103,4 +103,202 @@ describe Nightmare::Harness::SubagentRunner do
       FileUtils.rm_rf(temp_dir)
     end
   end
+
+  describe "subagent cooperative cancellation (TKT-018)" do
+    it "raises CancelledException when cancelled during token streaming" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "Streaming response token", tool_calls: nil)
+        ])
+
+        cancelled = false
+        runner = Nightmare::Harness::SubagentRunner.new(
+          client: client,
+          environment: env,
+          cancellation_check: ->{ cancelled }
+        )
+
+        # Trigger cancellation
+        cancelled = true
+
+        expect_raises(Nightmare::Harness::CancelledException, /Turn cancelled by user interrupt/) do
+          runner.run_subagent("Assess documentation")
+        end
+      end
+    end
+
+    it "raises CancelledException when cancelled during tool execution" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+
+        tool_call = Mantle::Clients::ToolCall.new(
+          id: "call_tool_1",
+          function: Mantle::Clients::ToolCallFunction.new(
+            name: "list_files",
+            arguments: %({"path":"."})
+          )
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [tool_call]),
+          Mantle::Clients::Response.new(content: "Done", tool_calls: nil)
+        ])
+
+        cancelled = false
+        runner = Nightmare::Harness::SubagentRunner.new(
+          client: client,
+          environment: env,
+          cancellation_check: ->{ cancelled }
+        )
+
+        # Cancel right before tool executes or during
+        cancelled = true
+
+        expect_raises(Nightmare::Harness::CancelledException, /Turn cancelled by user interrupt/) do
+          runner.run_subagent("Inspect workspace")
+        end
+      end
+    end
+
+    it "raises CancelledException in dispatch when cancelled" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "Working on plan item", tool_calls: nil)
+        ])
+
+        cancelled = true
+        runner = Nightmare::Harness::SubagentRunner.new(
+          client: client,
+          environment: env,
+          cancellation_check: ->{ cancelled }
+        )
+
+        item = Nightmare::Plan::PlanItem.new(
+          id: "item-1",
+          title: "Setup database"
+        )
+        plan = Nightmare::Plan::Plan.new(
+          id: "test-plan",
+          goal: "Test Plan",
+          items: [item]
+        )
+        run = Nightmare::Plan::PlanRun.new(
+          run_id: "run-1",
+          plan_id: plan.id,
+          plan_schema_version: plan.schema_version,
+          started_at: Time.utc,
+          updated_at: Time.utc,
+          status: Nightmare::Plan::PlanRunStatus::Running
+        )
+
+        expect_raises(Nightmare::Harness::CancelledException, /Turn cancelled by user interrupt/) do
+          runner.dispatch(item, run, temp_dir)
+        end
+      end
+    end
+
+    it "integrates with UI::Cancellation.cancel!" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+
+        store = Nightmare::Context::SlidingStore.new
+        calibrator = Nightmare::Context::TokenEstimator.new
+        tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+        guard = Nightmare::Tools::Guard.new(env)
+        shell = Nightmare::Tools::Shell.new(guard)
+        cancellation = Nightmare::UI::Cancellation.new(tool_loop, shell)
+        cancellation.busy = true
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "Autonomous subagent answer", tool_calls: nil)
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(
+          client: client,
+          environment: env
+        )
+
+        # Signal cancellation via UI::Cancellation
+        Nightmare::UI::Cancellation.cancel!
+
+        expect_raises(Nightmare::Harness::CancelledException, /Turn cancelled by user interrupt/) do
+          runner.run_subagent("Perform review")
+        end
+
+        tool_loop.cancelled?.should be_true
+      ensure
+        Nightmare::UI::Cancellation.current_instance = nil
+      end
+    end
+  end
+
+  describe "Shell global process group tracking and kill_all_active!" do
+    it "registers running process groups and terminates them via kill_all_active!" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+
+        guard = Nightmare::Tools::Guard.new(env)
+        shell_approval = ->(_cmd : String, _argv : Array(String), _metachar : Bool, _timeout : Int32) {
+          {Nightmare::Tools::ApprovalOutcome::Yes, nil.as(String?)}
+        }
+        shell = Nightmare::Tools::Shell.new(guard, approval_handler: shell_approval)
+
+        spawn do
+          # Run long sleep command in background fiber
+          shell.run_command("sleep 30")
+        end
+
+        # Wait briefly for process to spawn and pgid to register
+        10.times do
+          Fiber.yield
+          break unless Nightmare::Tools::Shell.active_pgids.empty?
+          sleep 10.milliseconds
+        end
+
+        Nightmare::Tools::Shell.active_pgids.empty?.should be_false
+        pgid = Nightmare::Tools::Shell.active_pgids.first
+
+        # Kill all active processes
+        Nightmare::Tools::Shell.kill_all_active!
+
+        # Wait for ensure block to clean up pgid
+        sleep 100.milliseconds
+        Nightmare::Tools::Shell.active_pgids.should_not contain(pgid)
+      end
+    end
+  end
 end

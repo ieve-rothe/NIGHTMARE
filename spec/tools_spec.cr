@@ -107,6 +107,49 @@ describe "Nightmare Tools Suite & Security Boundaries" do
       end
     end
 
+    it "reads file lines with offset and omitted limit without arithmetic overflow" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "lines.txt"), "one\ntwo\nthree\nfour\nfive")
+
+        result = tools.read_file("lines.txt", offset: 3)
+        result.should contain("3 | three")
+        result.should contain("4 | four")
+        result.should contain("5 | five")
+        result.should_not contain("1 | one")
+        result.should_not contain("2 | two")
+      end
+    end
+
+    it "handles offset beyond line count gracefully" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "lines.txt"), "one\ntwo\nthree\nfour\nfive")
+
+        result = tools.read_file("lines.txt", offset: 150)
+        result.should eq("")
+      end
+    end
+
+    it "returns empty output when limit is 0" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "lines.txt"), "one\ntwo\nthree\nfour\nfive")
+
+        result = tools.read_file("lines.txt", offset: 2, limit: 0)
+        result.should eq("")
+      end
+    end
+
     it "returns file metadata via file_info" do
       with_temp_dir do |root|
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)

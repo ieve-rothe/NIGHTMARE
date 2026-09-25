@@ -13,8 +13,30 @@ module Nightmare::UI
     property? sigint_received : Bool = false
     property last_sigint_at : Time::Instant? = nil
 
+    getter tool_loop : Harness::ToolLoop
+    getter shell : Tools::Shell
+
     def initialize(@tool_loop : Harness::ToolLoop, @shell : Tools::Shell)
       @@current_instance = self
+    end
+
+    def self.cancelled? : Bool
+      if inst = @@current_instance
+        inst.cancelled?
+      else
+        false
+      end
+    end
+
+    def self.cancel! : Nil
+      if inst = @@current_instance
+        inst.sigint_received = true
+        inst.tool_loop.cancelled = true
+      end
+    end
+
+    def cancelled? : Bool
+      @tool_loop.cancelled? || @sigint_received
     end
 
     def self.install_early_trap : Nil
@@ -27,17 +49,27 @@ module Nightmare::UI
 
     def handle_sigint : Nil
       @sigint_received = true
+      now = Time.instant
+
       if @busy
+        # Check double Ctrl+C within 1.5s while busy -> emergency force exit
+        if (last = @last_sigint_at) && (now - last) < 1.5.seconds
+          puts "\n[Double interrupt received; exiting immediately]"
+          STDOUT.flush
+          exit(130)
+        end
+        @last_sigint_at = now
+
         # Active turn/tool running -> cancel cooperatively (D3 / §5 Pipeline 5)
         @tool_loop.cancelled = true
         @shell.kill_active_process!
+        Tools::Shell.kill_all_active!
         puts "\n[Interrupt received; cancelling active turn...]"
         STDOUT.flush
       else
         # Idle at prompt -> flush any partially typed input
         flush_stdin
         # Check double Ctrl+C within 1.5s
-        now = Time.instant
         if (last = @last_sigint_at) && (now - last) < 1.5.seconds
           puts "\nExiting."
           exit(0)

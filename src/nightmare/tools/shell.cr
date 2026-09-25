@@ -20,6 +20,8 @@ module Nightmare::Tools
   end
 
   class Shell
+    class_property active_pgids : Array(Int64) = [] of Int64
+
     getter guard : Guard
     getter allowlist : Allowlist
     property approval_handler : Proc(String, Array(String), Bool, Int32, Tuple(ApprovalOutcome, String?))?
@@ -30,6 +32,26 @@ module Nightmare::Tools
     property max_timeout_seconds : Int32
     property tool_output_max_bytes : Int32
     property executed_commands : Array(Nightmare::Plan::ExecutedCommand) = [] of Nightmare::Plan::ExecutedCommand
+
+    def self.kill_all_active! : Nil
+      pgids = @@active_pgids.dup
+      pgids.each do |pgid|
+        terminate_process_group_id(pgid)
+      end
+    end
+
+    def self.terminate_process_group_id(pgid : Int64) : Nil
+      begin
+        LibC.kill(-pgid.to_i32, Signal::TERM.value)
+      rescue
+      end
+      sleep Config::PROCESS_GRACE_PERIOD
+      begin
+        LibC.kill(-pgid.to_i32, Signal::KILL.value)
+      rescue
+      end
+    rescue
+    end
 
     def initialize(
       @guard : Guard,
@@ -198,6 +220,7 @@ module Nightmare::Tools
 
       pgid = process.pid
       @current_pgid = pgid.to_i64
+      Shell.active_pgids << pgid.to_i64
       max_stream_bytes = @tool_output_max_bytes // 2
 
       stdout_io = IO::Memory.new
@@ -288,6 +311,7 @@ module Nightmare::Tools
           duration_ms: duration_ms
         )
         @current_pgid = nil
+        Shell.active_pgids.delete(pgid.to_i64)
       end
     end
 

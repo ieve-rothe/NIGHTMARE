@@ -235,6 +235,7 @@ module Nightmare
 
     private def execute_turn(user_input : String) : Nil
       @cancellation.busy = true
+      @cancellation.sigint_received = false
       @stream_ctrl.reset
 
       # Interruption advisory is handled centrally by SlidingStore#start_turn
@@ -313,6 +314,7 @@ module Nightmare
       Mantle::Clients::LoggingClient.flush
       @registry.set_active_side_effects(nil)
       @cancellation.busy = false
+      @cancellation.sigint_received = false
     end
   end
 end

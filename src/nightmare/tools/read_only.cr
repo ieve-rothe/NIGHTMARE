@@ -125,14 +125,15 @@ module Nightmare::Tools
 
       selected_lines = [] of String
       if offset || limit
-        max_lines = limit ? Math.max(0, limit) : Int32::MAX
-        idx = 0
-        File.each_line(full_path) do |line|
-          idx += 1
-          if idx >= start_line && selected_lines.size < max_lines
+        max_lines = limit ? Math.max(0, limit) : nil
+        if max_lines.nil? || max_lines > 0
+          idx = 0
+          File.each_line(full_path) do |line|
+            idx += 1
+            next if idx < start_line
+
             selected_lines << line
-          elsif idx >= start_line + max_lines
-            break
+            break if max_lines && selected_lines.size >= max_lines
           end
         end
       else
@@ -151,7 +152,7 @@ module Nightmare::Tools
       end
 
       formatted = selected_lines.map_with_index do |line, idx|
-        line_num = start_line + idx
+        line_num = start_line.to_i64 + idx
         "#{line_num.to_s.rjust(5)} | #{line}"
       end.join("\n")
 

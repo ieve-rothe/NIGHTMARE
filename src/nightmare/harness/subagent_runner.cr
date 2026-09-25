@@ -13,7 +13,9 @@ require "../tools/guard"
 require "../tools/shell"
 require "../tools/mutation"
 require "../tools/read_only"
+require "../ui/cancellation"
 require "./types"
+require "./tool_loop"
 
 module Nightmare::Harness
   class SubagentRunner < Nightmare::Plan::SubagentDispatcher
@@ -23,6 +25,7 @@ module Nightmare::Harness
     getter diff_approval : Proc(String, String, Bool)?
     getter shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))?
     property turn_presenter : Nightmare::UI::TurnPresenter?
+    property cancellation_check : Proc(Bool)?
 
     def initialize(
       @client : Mantle::Clients::Client,
@@ -30,8 +33,16 @@ module Nightmare::Harness
       @pacer : Nightmare::Plan::Pacer? = nil,
       @diff_approval : Proc(String, String, Bool)? = nil,
       @shell_approval : Proc(String, Array(String), Bool, Int32, Tuple(Nightmare::Tools::ApprovalOutcome, String?))? = nil,
-      @turn_presenter : Nightmare::UI::TurnPresenter? = nil
+      @turn_presenter : Nightmare::UI::TurnPresenter? = nil,
+      @cancellation_check : Proc(Bool)? = nil
     )
+    end
+
+    def cancelled? : Bool
+      if check = @cancellation_check
+        return true if check.call
+      end
+      UI::Cancellation.cancelled?
     end
 
     def dispatch(
@@ -79,6 +90,22 @@ module Nightmare::Harness
 
       subagent_tools = registry.build_subagent_tools
 
+      wrapped_subagent_tools = subagent_tools.map do |tool|
+        orig_handler = tool.handler
+        wrapped = tool.dup
+        wrapped.handler = ->(args : Hash(String, JSON::Any)) {
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+          res = orig_handler ? orig_handler.call(args) : ""
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+          res
+        }
+        wrapped
+      end
+
       # Build prompt
       system_prompt = build_system_prompt(item, worktree_path)
       user_prompt = build_user_prompt(item)
@@ -90,6 +117,9 @@ module Nightmare::Harness
 
       tool_calls_count = 0
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
+        if cancelled?
+          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+        end
         if last_res
           if calls = last_res.tool_calls
             tool_calls_count += calls.size
@@ -104,7 +134,7 @@ module Nightmare::Harness
       max_iterations = item.budget_iterations || @environment.settings.max_iterations
       step = Mantle::Step.new(
         client: @client,
-        tools: subagent_tools,
+        tools: wrapped_subagent_tools,
         max_iterations: max_iterations,
         on_iteration: on_iteration
       )
@@ -116,7 +146,16 @@ module Nightmare::Harness
       proposed_targets = [] of String
 
       begin
-        result = step.run(messages)
+        result = step.run(messages) do |_chunk|
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+        end
+
+        if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
+          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+        end
+
         if resp = result.raw_response
           tokens_used = (resp.prompt_eval_count || 0) + (resp.eval_count || 0)
         end
@@ -128,6 +167,8 @@ module Nightmare::Harness
           status = "failed"
           summary = "Subagent error: #{result.error}"
         end
+      rescue ex : CancelledException
+        raise ex
       rescue ex
         status = "failed"
         summary = "Subagent exception: #{ex.message}"
@@ -193,29 +234,38 @@ module Nightmare::Harness
         tp.render_dashboard(action_label: "Subagent spawned")
       end
 
-      wrapped_subagent_tools = if tp
-        subagent_tools.map do |tool|
-          orig_handler = tool.handler
-          wrapped = tool.dup
-          wrapped.handler = ->(args : Hash(String, JSON::Any)) {
-            tool_name = tool.function.name
-            args_summary = args.map { |k, v| "#{k}: #{v}" }.join(", ")
-            telemetry.active_tool = "#{tool_name}(#{args_summary})"
-            telemetry.tool_calls_count += 1
-            telemetry.files_touched = files_touched.dup
+      wrapped_subagent_tools = subagent_tools.map do |tool|
+        orig_handler = tool.handler
+        wrapped = tool.dup
+        wrapped.handler = ->(args : Hash(String, JSON::Any)) {
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
 
-            res = orig_handler ? orig_handler.call(args) : ""
+          tool_name = tool.function.name
+          args_summary = args.map { |k, v| "#{k}: #{v}" }.join(", ")
+          telemetry.active_tool = "#{tool_name}(#{args_summary})"
+          telemetry.tool_calls_count += 1
+          telemetry.files_touched = files_touched.dup
+
+          res = orig_handler ? orig_handler.call(args) : ""
+          if tp
             tp.present_tool_result(tool_name, args, res)
-            res
-          }
-          wrapped
-        end
-      else
-        subagent_tools
+          end
+
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+          res
+        }
+        wrapped
       end
 
       tool_calls_count = 0
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
+        if cancelled?
+          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+        end
         if last_res
           if calls = last_res.tool_calls
             tool_calls_count += calls.size
@@ -244,7 +294,16 @@ module Nightmare::Harness
       )
 
       begin
-        result = step.run(messages)
+        result = step.run(messages) do |_chunk|
+          if cancelled?
+            raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+        end
+
+        if cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
+          raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
+        end
+
         if result.ok?
           raw_response = result.unwrap
           summary, _proposed_items, _proposed_targets = parse_subagent_output(raw_response, "subagent")
@@ -259,6 +318,8 @@ module Nightmare::Harness
         else
           "[Subagent error: #{result.error}]"
         end
+      rescue ex : CancelledException
+        raise ex
       rescue ex
         "[Subagent exception: #{ex.message}]"
       ensure
