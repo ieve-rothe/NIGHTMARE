@@ -5,23 +5,47 @@
 require "colorize"
 require "../tools/diff"
 require "../tools/shell"
+require "../harness/tool_loop"
+require "./cancellation"
 
 module Nightmare::UI
   class Approval
     getter root : String
     getter input : IO
     getter output : IO
+    property cancellation_check : Proc(Bool)? = nil
 
     lib LibC
+      struct PollFd
+        fd : Int32
+        events : Int16
+        revents : Int16
+      end
+      POLLIN   = 0x0001_i16
+      POLLHUP  = 0x0010_i16
+      POLLERR  = 0x0008_i16
+      TCIFLUSH =          0
+
       fun ioctl(fd : Int32, request : UInt64, ...) : Int32
+      fun poll(fds : PollFd*, nfds : UInt64, timeout : Int32) : Int32
+      fun tcflush(fd : Int32, queue_selector : Int32) : Int32
     end
 
     def initialize(@root : String, @input : IO = STDIN, @output : IO = STDOUT)
     end
 
+    private def cancelled? : Bool
+      if check = @cancellation_check
+        check.call
+      else
+        Nightmare::UI::Cancellation.cancelled?
+      end
+    end
+
     # Drains any unconsumed input pending on a FileDescriptor (e.g. STDIN) before prompting
     private def flush_input : Nil
       if fd_io = @input.as?(IO::FileDescriptor)
+        LibC.tcflush(fd_io.fd, LibC::TCIFLUSH)
         bytes_avail = 0
         if LibC.ioctl(fd_io.fd, 0x541Bu64, pointerof(bytes_avail)) == 0 && bytes_avail > 0
           buf = Bytes.new(bytes_avail)
@@ -29,6 +53,45 @@ module Nightmare::UI
         end
       end
     rescue
+    end
+
+    # Reads a line of input while cooperatively checking for cancellation interrupts.
+    # When cancelled via SIGINT / Cancellation.cancelled?, raises CancelledException
+    # immediately instead of blocking the main fiber indefinitely on STDIN.
+    private def gets_interactive : String?
+      if cancelled?
+        flush_input
+        raise Harness::CancelledException.new("Turn cancelled by user interrupt")
+      end
+
+      if fd_io = @input.as?(IO::FileDescriptor)
+        pfd = LibC::PollFd.new(
+          fd: fd_io.fd,
+          events: LibC::POLLIN | LibC::POLLHUP | LibC::POLLERR,
+          revents: 0_i16
+        )
+
+        loop do
+          if cancelled?
+            flush_input
+            raise Harness::CancelledException.new("Turn cancelled by user interrupt")
+          end
+
+          # Poll with short 50ms timeout to maintain responsive signal checking
+          ret = LibC.poll(pointerof(pfd), 1_u64, 50)
+          if ret > 0
+            break
+          end
+          Fiber.yield
+        end
+      end
+
+      if cancelled?
+        flush_input
+        raise Harness::CancelledException.new("Turn cancelled by user interrupt")
+      end
+
+      @input.gets
     end
 
     # Strips ANSI escape sequences (CSI, OSC, focus tracking, bracketed paste)
@@ -50,7 +113,7 @@ module Nightmare::UI
         @output.print "Approve #{description}? [y/N/a]: "
         @output.flush
 
-        raw = @input.gets
+        raw = gets_interactive
         return false if raw.nil?
 
         input = sanitize_terminal_input(raw)
@@ -190,7 +253,7 @@ module Nightmare::UI
         @output.print "Approve command? [y/N/e/a/p]: "
         @output.flush
 
-        raw = @input.gets
+        raw = gets_interactive
         return {Tools::ApprovalOutcome::No, nil} if raw.nil?
 
         input = sanitize_terminal_input(raw)
@@ -202,7 +265,7 @@ module Nightmare::UI
         when "e"
           @output.print "Edit command: "
           @output.flush
-          edited_raw = @input.gets
+          edited_raw = gets_interactive
           edited = edited_raw ? sanitize_terminal_input(edited_raw) : ""
           return {Tools::ApprovalOutcome::Edit, edited}
         when "a"

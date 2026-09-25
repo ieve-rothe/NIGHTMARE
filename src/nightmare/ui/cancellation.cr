@@ -60,6 +60,7 @@ module Nightmare::UI
         end
         @last_sigint_at = now
 
+        flush_stdin
         # Active turn/tool running -> cancel cooperatively (D3 / §5 Pipeline 5)
         @tool_loop.cancelled = true
         @shell.kill_active_process!
@@ -83,10 +84,13 @@ module Nightmare::UI
     end
 
     lib LibC
+      TCIFLUSH = 0
       fun ioctl(fd : Int32, request : UInt64, ...) : Int32
+      fun tcflush(fd : Int32, queue_selector : Int32) : Int32
     end
 
     private def flush_stdin : Nil
+      LibC.tcflush(STDIN.fd, LibC::TCIFLUSH)
       bytes_avail = 0
       if LibC.ioctl(STDIN.fd, 0x541Bu64, pointerof(bytes_avail)) == 0 && bytes_avail > 0
         buf = Bytes.new(bytes_avail)
