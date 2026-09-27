@@ -286,14 +286,16 @@ module Nightmare
         val = outcome.value.not_nil!
         if @markdown_formatting && STDOUT.tty?
           if !@stream_ctrl.visible_text.empty? || !val.empty?
-            unless @turn_presenter.split_mode_active?
-              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete")
-            end
-            puts Salamander::UI.render_separator("Response")
-            if !@stream_ctrl.visible_text.empty?
-              puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
+            if @turn_presenter.split_mode_active?
+              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete", format_right_pane: true)
             else
-              puts Salamander::UI::MarkdownFormatter.format(val)
+              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete")
+              puts Salamander::UI.render_separator("Response")
+              if !@stream_ctrl.visible_text.empty?
+                puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
+              else
+                puts Salamander::UI::MarkdownFormatter.format(val)
+              end
             end
           end
           STDOUT.flush

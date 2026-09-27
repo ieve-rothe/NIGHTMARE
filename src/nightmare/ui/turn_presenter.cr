@@ -312,7 +312,7 @@ end
     end
 
     # Clears screen and renders single-turn dashboard with Opened Files Deck & Active Preview
-    def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil) : Nil
+    def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil, format_right_pane : Bool = false) : Nil
   @last_active_file = active_file
   @last_active_offset = active_offset
   @last_action_label = action_label
@@ -329,24 +329,34 @@ end
   left_str = mem.to_s
 
   if split_mode_active?
-    right_w = term_w - box_w - 3
-    left_lines = left_str.lines
-    
-    right_lines = [] of String
+  right_w = term_w - box_w - 3
+  left_lines = left_str.lines
+  
+  right_lines = [] of String
+  if format_right_pane
+    full_text = @stream_history.join("\n")
+    full_text += "\n" + @stream_current unless @stream_current.empty?
+    formatted = Salamander::UI::MarkdownFormatter.format(full_text)
+    formatted.each_line do |line|
+      right_lines.concat(Panel.wrap_text(line, right_w))
+    end
+  else
     @stream_history.each do |line|
        right_lines.concat(Panel.wrap_text(line, right_w))
     end
     if !@stream_current.empty?
        right_lines.concat(Panel.wrap_text(@stream_current, right_w))
     end
-    
-    disp_h = term_h - 1
-    if right_lines.size > disp_h
-       right_lines = right_lines.last(disp_h)
-    end
-    
-    out_lines = [] of String
-    max_lines = Math.max([left_lines.size, right_lines.size].max, disp_h)
+  end
+  
+  disp_h = term_h - 1
+  if right_lines.size > disp_h
+     right_lines = right_lines.last(disp_h)
+  end
+  
+  out_lines = [] of String
+  max_lines = [left_lines.size, right_lines.size].max
+  max_lines = Math.min(max_lines, disp_h)
     
     (0...max_lines).each do |i|
       l = left_lines[i]? || ""
