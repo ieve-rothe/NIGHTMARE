@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Apple Dark Mode ("Cupertino") UI Theme**: Added minimalist, high-contrast dark theme with slate graphite borders, crisp typography, and subtle unicode glyphs (`▤`, `⌕`, `◈`, `›`, `·`), replacing loud neon colors and emojis.
+- **Dual-Pane Side-by-Side Split Mode**: Automatic split-pane rendering on wide terminals (≥160 columns) with turn cards on the left and streaming model responses/tool outputs on the right.
+- **System Events "Source of Truth" Card**: Tracks file writes, mutations, and executed shell commands directly in the turn card deck.
+- **Configurable Subagent Iterations & Exit Interviews (TKT-024)**: Independent `subagent_max_iterations` budget, dynamic iteration overrides, and automated exit interview / deterministic telemetry post-mortem upon hitting loop or turn limits.
+- **Windowed Unified Diff Previews (TKT-023)**: Localized diff hunk previews with syntax-highlighted context lines during file edits.
+
+### Fixed
+- Fixed split pane right-column line wrapping, double-printing of agent streaming tokens, and height misalignment.
+- Fixed display of final agent responses in right pane upon turn completion.
+
 ## [0.3.5] - 2026-09-25
 
 ### Added
