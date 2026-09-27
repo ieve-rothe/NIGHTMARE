@@ -63,6 +63,7 @@ property last_render : String? = nil
 property last_active_file : OpenedFile? = nil
 property last_active_offset : Int32 = 1
 property last_action_label : String? = nil
+property system_messages : Array(String) = [] of String
 
 
     def initialize(
@@ -114,6 +115,9 @@ private def enforce_history_limit : Nil
 end
 
 def display_msg(msg : String) : Nil
+  msg.each_line do |l|
+    @system_messages << l unless l.strip.empty?
+  end
   if split_mode_active?
     append_right_pane(msg)
   else
@@ -124,6 +128,7 @@ end
 
     def reset_for_new_turn(user_prompt : String, previous_response : String? = nil) : Nil
       @opened_files.clear
+      @system_messages.clear
       @current_user_prompt = user_prompt
       @agent_thought = nil
       @last_agent_response = previous_response
@@ -251,6 +256,20 @@ end
         else
           tag = Theme.bracket_tag("MUTATION", name.upcase, Theme.success_icon)
           display_msg "  #{Theme.success_icon}✓#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
+
+          file_content = if File.exists?(path)
+            File.read(path) rescue nil
+          else
+            args["content"]?.try(&.as_s?)
+          end
+          if file_content
+            opened = record_file_open(path, file_content)
+            @last_active_file = opened
+            @last_active_offset = 1
+            if collapsed_mode? || split_mode_active?
+              render_dashboard(active_file: opened, active_offset: 1, action_label: "#{name}('#{path}')")
+            end
+          end
         end
         @output.flush
       elsif name == "shell" || name == "run_command"
@@ -538,6 +557,43 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
         )
         code_lines.each { |l| @output.puts l }
         @output.puts panel.render_footer(Theme.border)
+        @output.puts
+      end
+
+      # 3.5. System Events Card (Mutations, Shell Commands, Tool Outputs - Source of Truth)
+      unless @system_messages.empty?
+        events_title = "#{Theme.title}⚡ System Events#{Theme::RESET} #{Theme.meta_dim}(#{@system_messages.size} event#{@system_messages.size == 1 ? "" : "s"})#{Theme::RESET}"
+        events_badge = box_w < 75 ? nil : "#{Theme.status_tag}SOURCE OF TRUTH#{Theme::RESET}"
+        @output.puts panel.render_header(events_title, events_badge, Theme.border_active)
+
+        max_events = if term_h <= 28
+          3
+        elsif term_h <= 35
+          5
+        else
+          8
+        end
+
+        displayed_events = if @system_messages.size > max_events
+          @system_messages.last(max_events)
+        else
+          @system_messages
+        end
+
+        if @system_messages.size > displayed_events.size
+          overflow = @system_messages.size - displayed_events.size
+          @output.puts panel.render_row("  #{Theme.meta_dim}... [+#{overflow} earlier system events in turn] ...#{Theme::RESET}", Theme.border_active)
+        end
+
+        displayed_events.each do |msg|
+          clean = msg.strip
+          formatted_row = clean.starts_with?("│") ? "   #{clean}" : " #{clean}"
+          panel.render_wrapped_row(formatted_row, Theme.border_active, max_lines: 2).each do |w|
+            @output.puts w
+          end
+        end
+
+        @output.puts panel.render_footer(Theme.border_active)
         @output.puts
       end
 

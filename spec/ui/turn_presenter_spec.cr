@@ -307,5 +307,50 @@ describe Nightmare::UI::TurnPresenter do
     clean_list.should contain("src")
     clean_list.should contain("3 entries")
   end
+
+  it "tracks mutated files in context deck and renders the System Events card as source of truth" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(calibrator: calibrator, output: io)
+    presenter.reset_for_new_turn("Create health tracking page")
+
+    args = {
+      "path"    => JSON::Any.new("chili/Seven_Health_Tracking.md"),
+      "content" => JSON::Any.new("# Seven Health Tracking\n- Diabetes\n- Myositis\n"),
+    }
+
+    presenter.present_tool_result("write_file", args, "Successfully wrote 45 bytes to chili/Seven_Health_Tracking.md")
+
+    # Verify presenter recorded system message
+    presenter.system_messages.size.should eq(1)
+    presenter.system_messages.first.should contain("MUTATION: WRITE_FILE")
+    presenter.system_messages.first.should contain("chili/Seven_Health_Tracking.md")
+
+    # Verify mutated file is tracked in opened_files and active inspection
+    presenter.opened_files.map(&.path).should contain("chili/Seven_Health_Tracking.md")
+    presenter.last_active_file.try(&.path).should eq("chili/Seven_Health_Tracking.md")
+
+    # Render dashboard at turn complete
+    io.clear
+    presenter.render_dashboard(
+      active_file: presenter.last_active_file,
+      active_offset: 1,
+      action_label: "Turn Complete · 1 file modified (chili/Seven_Health_Tracking.md)"
+    )
+
+    rendered = Salamander::UI::Panel.strip_ansi(io.to_s)
+    rendered.should contain("System Events (1 event)")
+    rendered.should contain("SOURCE OF TRUTH")
+    rendered.should contain("MUTATION: WRITE_FILE")
+    rendered.should contain("chili/Seven_Health_Tracking.md")
+    rendered.should contain("Turn Complete · 1 file modified (chili/Seven_Health_Tracking.md)")
+    rendered.should contain("Opened Files")
+    rendered.should contain("Active Inspection: chili/Seven_Health_Tracking.md")
+
+    # Reset for next turn clears system messages
+    presenter.reset_for_new_turn("Next turn")
+    presenter.system_messages.should be_empty
+    presenter.opened_files.should be_empty
+  end
 end
 

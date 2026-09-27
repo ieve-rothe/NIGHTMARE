@@ -286,10 +286,23 @@ module Nightmare
         val = outcome.value.not_nil!
         if @markdown_formatting && STDOUT.tty?
           if !@stream_ctrl.visible_text.empty? || !val.empty?
-            if @turn_presenter.split_mode_active?
-              final_text = @stream_ctrl.visible_text.empty? ? val : @stream_ctrl.visible_text; @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete", format_right_pane: true, final_response: final_text)
+            action_lbl = if !side_effects.empty?
+              if side_effects.size == 1
+                "Turn Complete · 1 file modified (#{side_effects.first})"
+              else
+                "Turn Complete · #{side_effects.size} files modified"
+              end
+            elsif !@turn_presenter.system_messages.empty?
+              "Turn Complete · #{@turn_presenter.system_messages.size} system event#{@turn_presenter.system_messages.size == 1 ? "" : "s"}"
             else
-              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete")
+              "Turn Complete"
+            end
+
+            if @turn_presenter.split_mode_active?
+              final_text = @stream_ctrl.visible_text.empty? ? val : @stream_ctrl.visible_text
+              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, action_lbl, format_right_pane: true, final_response: final_text)
+            else
+              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, action_lbl)
               puts Salamander::UI.render_separator("Response")
               if !@stream_ctrl.visible_text.empty?
                 puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
