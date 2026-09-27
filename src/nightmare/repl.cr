@@ -287,7 +287,7 @@ module Nightmare
         if @markdown_formatting && STDOUT.tty?
           if !@stream_ctrl.visible_text.empty? || !val.empty?
             if @turn_presenter.split_mode_active?
-              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete", format_right_pane: true)
+              final_text = @stream_ctrl.visible_text.empty? ? val : @stream_ctrl.visible_text; @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete", format_right_pane: true, final_response: final_text)
             else
               @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete")
               puts Salamander::UI.render_separator("Response")

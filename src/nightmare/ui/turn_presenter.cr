@@ -312,7 +312,7 @@ end
     end
 
     # Clears screen and renders single-turn dashboard with Opened Files Deck & Active Preview
-    def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil, format_right_pane : Bool = false) : Nil
+    def render_dashboard(active_file : OpenedFile? = nil, active_offset : Int32 = 1, action_label : String? = nil, format_right_pane : Bool = false, final_response : String? = nil) : Nil
   @last_active_file = active_file
   @last_active_offset = active_offset
   @last_action_label = action_label
@@ -334,12 +334,19 @@ end
   
   right_lines = [] of String
   if format_right_pane
-    full_text = @stream_history.join("\n")
-    full_text += "\n" + @stream_current unless @stream_current.empty?
-    formatted = Salamander::UI::MarkdownFormatter.format(full_text)
-    formatted.each_line do |line|
-      right_lines.concat(Panel.wrap_text(line, right_w))
-    end
+  text_to_format = final_response || begin
+    t = @stream_history.join("\n")
+    t += "\n" + @stream_current unless @stream_current.empty?
+    t
+  end
+  text_to_format = " " if text_to_format.empty?
+  formatted = Salamander::UI::MarkdownFormatter.format(text_to_format)
+  formatted.each_line do |line|
+    right_lines.concat(Panel.wrap_text(line, right_w))
+  end
+  if right_lines.empty? && !formatted.empty?
+    right_lines << formatted
+  end
   else
     @stream_history.each do |line|
        right_lines.concat(Panel.wrap_text(line, right_w))
