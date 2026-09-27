@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-27
+
 ### Added
 - **Apple Dark Mode ("Cupertino") UI Theme**: Added minimalist, high-contrast dark theme with slate graphite borders, crisp typography, and subtle unicode glyphs (`▤`, `⌕`, `◈`, `›`, `·`), replacing loud neon colors and emojis.
 - **Dual-Pane Side-by-Side Split Mode**: Automatic split-pane rendering on wide terminals (≥160 columns) with turn cards on the left and streaming model responses/tool outputs on the right.
