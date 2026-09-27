@@ -403,7 +403,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
       total_tok = @opened_files.sum(&.tokens)
       stats_content = "#{Theme.meta_dim}Files:#{Theme::RESET} #{@opened_files.size} (#{format_bytes(total_b)}, #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}) #{Theme.meta_dim}│ Loaded:#{Theme::RESET} #{total_accumulated_lines}/#{threshold_lines}L #{Theme.meta_dim}│ Layout:#{Theme::RESET} #{box_w}c"
       @output.puts panel.render_divider(Theme.border)
-      @output.puts panel.render_row(stats_content, Theme.border)
+      panel.render_wrapped_row(stats_content, Theme.border, max_lines: 2).each { |w| @output.puts w }
       @output.puts panel.render_footer(Theme.border)
       @output.puts
 
@@ -448,13 +448,13 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
           @output.puts w
         end
         if action = subagent.active_tool
-          @output.puts panel.render_row("Action : #{Theme.highlight}#{action}#{Theme::RESET}", Theme.border_active)
+          panel.render_wrapped_row("Action : #{Theme.highlight}#{action}#{Theme::RESET}", Theme.border_active, max_lines: 2).each { |w| @output.puts w }
         end
         if th = subagent.last_thought
-          @output.puts panel.render_row("Thought: #{Theme.thought}💭 #{th.lines.first}#{Theme::RESET}", Theme.border_active)
+          panel.render_wrapped_row("Thought: #{Theme.thought}💭 #{th.lines.first}#{Theme::RESET}", Theme.border_active, max_lines: 3).each { |w| @output.puts w }
         end
         unless subagent.files_touched.empty?
-          @output.puts panel.render_row("Touched: #{Theme.filename}#{subagent.files_touched.uniq.join(", ")}#{Theme::RESET}", Theme.border_active)
+          panel.render_wrapped_row("Touched: #{Theme.filename}#{subagent.files_touched.uniq.join(", ")}#{Theme::RESET}", Theme.border_active, max_lines: 2).each { |w| @output.puts w }
         end
         @output.puts panel.render_footer(Theme.border_active)
         @output.puts
@@ -486,7 +486,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
           "#{Theme.meta_dim}[#{format_bytes(f.size_bytes)} · #{f.lines}L · #{Theme.token_badge}#{format_tokens(f.tokens)}#{Theme::RESET}#{Theme.meta_dim} · #{f.read_range}]#{Theme::RESET}"
         end
         row_str = " #{icon} #{fname} #{meta}"
-        @output.puts panel.render_row(row_str, Theme.border_active)
+        @output.puts panel.render_row(row_str, Theme.border_active, truncate: true)
       end
 
       @output.puts panel.render_footer(Theme.border_active)

@@ -55,7 +55,7 @@ module Nightmare
       system_prompt_path : String? = nil,
       model_override : String? = nil,
       @no_log : Bool = false,
-      markdown_override : Bool? = nil
+      markdown_override : Bool? = nil,
     )
       @markdown_formatting = @env.resolve_markdown_formatting(markdown_override)
       @no_log = @no_log || !@env.resolve_logging(cli_no_log: @no_log)
@@ -172,15 +172,15 @@ module Nightmare
       )
       @step_runner.turn_presenter = @turn_presenter
 
-@stream_ctrl = UI::StreamController.new
-@stream_ctrl.on_print = ->(s : String) {
-  if @turn_presenter.split_mode_active?
-    @turn_presenter.append_stream_text(s)
-  else
-    print s
-    STDOUT.flush
-  end
-}
+      @stream_ctrl = UI::StreamController.new
+      @stream_ctrl.on_print = ->(s : String) {
+        if @turn_presenter.split_mode_active?
+          @turn_presenter.append_stream_text(s)
+        else
+          print s
+          STDOUT.flush
+        end
+      }
 
       @cancellation = UI::Cancellation.new(@tool_loop, @registry.shell)
       @skills_manager = Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
@@ -209,10 +209,10 @@ module Nightmare
 
       loop do
         glyph = if active_skill = @skills_manager.active_skill
-          "#{Salamander::UI::Theme.status_tag}[#{active_skill.name}]#{Salamander::UI::Theme::RESET} #{Salamander::UI::Theme.prompt_glyph}"
-        else
-          Salamander::UI::Theme.prompt_glyph.to_s
-        end
+                  "#{Salamander::UI::Theme.status_tag}[#{active_skill.name}]#{Salamander::UI::Theme::RESET} #{Salamander::UI::Theme.prompt_glyph}"
+                else
+                  Salamander::UI::Theme.prompt_glyph.to_s
+                end
         print "#{glyph}#{Salamander::UI::Theme.user_prompt}"
         STDOUT.flush
 
@@ -285,13 +285,16 @@ module Nightmare
       if outcome.ok?
         val = outcome.value.not_nil!
         if @markdown_formatting && STDOUT.tty?
-          if !@stream_ctrl.visible_text.empty?
-            Salamander::UI.clear_and_reposition(@stream_ctrl.visible_text) unless @turn_presenter.split_mode_active?
+          if !@stream_ctrl.visible_text.empty? || !val.empty?
+            unless @turn_presenter.split_mode_active?
+              @turn_presenter.render_dashboard(@turn_presenter.last_active_file, @turn_presenter.last_active_offset, "Turn Complete")
+            end
             puts Salamander::UI.render_separator("Response")
-            puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
-          elsif !val.empty?
-            puts Salamander::UI.render_separator("Response")
-            puts Salamander::UI::MarkdownFormatter.format(val)
+            if !@stream_ctrl.visible_text.empty?
+              puts Salamander::UI::MarkdownFormatter.format(@stream_ctrl.visible_text)
+            else
+              puts Salamander::UI::MarkdownFormatter.format(val)
+            end
           end
           STDOUT.flush
         else
