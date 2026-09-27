@@ -214,7 +214,7 @@ end
           return
         elsif result_str.starts_with?("[File is already pinned")
           tag = Theme.bracket_tag("PINNED", "SHORT-CIRCUIT", Theme.status_tag)
-          display_msg "  #{Theme.status_tag}📌#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}·#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· already pinned in context#{Theme::RESET}"
           @output.flush
           return
         elsif result_str.starts_with?("[SecurityError:") || result_str.starts_with?("[Tool error:") || result_str.starts_with?("{\"error\":")
@@ -234,7 +234,7 @@ end
           box_w = Panel.clamp_width(term_w, @max_width)
           panel = Panel.new(box_w, Theme.box_style)
 
-          file_title = "#{Theme.title}📄 read_file:#{Theme::RESET} #{Theme.filename}#{opened.path}#{Theme::RESET} #{Theme.meta_dim}(#{opened.lines}L · #{format_bytes(opened.size_bytes)} · #{format_tokens(opened.tokens)})#{Theme::RESET}"
+          file_title = "#{Theme.title}▤ read_file:#{Theme::RESET} #{Theme.filename}#{opened.path}#{Theme::RESET} #{Theme.meta_dim}(#{opened.lines}L · #{format_bytes(opened.size_bytes)} · #{format_tokens(opened.tokens)})#{Theme::RESET}"
           @output.puts
           @output.puts panel.render_header(file_title, nil, Theme.border)
           opened.content.lines.each_with_index do |l, i|
@@ -311,7 +311,7 @@ end
           display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           match_count = result_str.lines.size
-          display_msg "  #{Theme.highlight}🔍#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
+          display_msg "  #{Theme.highlight}⌕#{Theme::RESET} #{Theme.bracket_tag("SEARCH", "'#{pattern}'")} #{Theme.meta_dim}(#{match_count} match lines)#{Theme::RESET}"
         end
         @output.flush
       elsif name == "list_files"
@@ -321,7 +321,7 @@ end
           display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
         else
           file_count = result_str.lines.size
-          display_msg "  #{Theme.status_tag}📁#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
+          display_msg "  #{Theme.status_tag}▤#{Theme::RESET} #{Theme.bracket_tag("LIST", path)} #{Theme.meta_dim}(#{file_count} entries)#{Theme::RESET}"
         end
         @output.flush
       else
@@ -421,7 +421,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
       if sname = @active_skill_name
         turn_title = "#{turn_title} #{Theme.meta_dim}·#{Theme::RESET} #{Theme.status_tag}SKILL:#{sname}#{Theme::RESET}"
       end
-      status_badge = "#{Theme.token_badge}● CARDS COMPRESSED#{Theme::RESET}"
+      status_badge = collapsed_mode? ? "#{Theme.meta_dim}compact#{Theme::RESET}" : nil
 
       @output.puts panel.render_header(turn_title, status_badge, Theme.border)
       prompt_content = "#{Theme.user_prompt}#{Theme.prompt_glyph}#{@current_user_prompt}#{Theme::RESET}"
@@ -431,7 +431,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
       end
 
       if thought = @agent_thought
-        thought_content = "#{Theme.thought}💭 #{thought}#{Theme::RESET}"
+        thought_content = "#{Theme.thought}· #{thought}#{Theme::RESET}"
         @output.puts panel.render_row(thought_content, Theme.border)
       end
 
@@ -447,7 +447,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
       if resp = @last_agent_response
         raw_lines = resp.strip.lines
         unless raw_lines.empty?
-          resp_title = "#{Theme.title}✦ AGENT RESPONSE#{Theme::RESET}"
+          resp_title = "#{Theme.title}› AGENT RESPONSE#{Theme::RESET}"
           max_resp_lines = term_h <= 30 ? 3 : @max_response_lines
           if raw_lines.size <= max_resp_lines
             resp_badge = "#{Theme.meta_dim}#{raw_lines.size} lines#{Theme::RESET}"
@@ -477,8 +477,8 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
 
       # 1.6. Active Subagent Engaged Card (Live Subagent Telemetry)
       if subagent = @active_subagent
-        sub_title = "#{Theme.title_active}🤖 SUBAGENT ENGAGED#{Theme::RESET}"
-        sub_badge = "#{Theme.token_badge}ITER #{subagent.iteration}/#{subagent.max_iterations} ∷ #{subagent.tool_calls_count} TOOLS#{Theme::RESET}"
+        sub_title = "#{Theme.title_active}◈ SUBAGENT ENGAGED#{Theme::RESET}"
+        sub_badge = "#{Theme.meta_dim}ITER #{subagent.iteration}/#{subagent.max_iterations} ∷ #{subagent.tool_calls_count} TOOLS#{Theme::RESET}"
         @output.puts panel.render_header(sub_title, sub_badge, Theme.border_active)
         panel.render_wrapped_row("Task   : #{Theme.code_text}#{subagent.task}#{Theme::RESET}", Theme.border_active, max_lines: 2).each do |w|
           @output.puts w
@@ -487,7 +487,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
           panel.render_wrapped_row("Action : #{Theme.highlight}#{action}#{Theme::RESET}", Theme.border_active, max_lines: 2).each { |w| @output.puts w }
         end
         if th = subagent.last_thought
-          panel.render_wrapped_row("Thought: #{Theme.thought}💭 #{th.lines.first}#{Theme::RESET}", Theme.border_active, max_lines: 3).each { |w| @output.puts w }
+          panel.render_wrapped_row("Thought: #{Theme.thought}· #{th.lines.first}#{Theme::RESET}", Theme.border_active, max_lines: 3).each { |w| @output.puts w }
         end
         unless subagent.files_touched.empty?
           panel.render_wrapped_row("Touched: #{Theme.filename}#{subagent.files_touched.uniq.join(", ")}#{Theme::RESET}", Theme.border_active, max_lines: 2).each { |w| @output.puts w }
@@ -497,9 +497,8 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
       end
 
       # 2. Grouped Opened Files Deck
-      deck_title = "#{Theme.title}📚 Opened Files#{Theme::RESET} #{Theme.meta_dim}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme.token_badge}#{format_tokens(total_tok)}#{Theme::RESET}#{Theme.meta_dim})#{Theme::RESET}"
-      badge = box_w < 75 ? nil : "#{Theme.meta_dim}ALL IN ONE BOX#{Theme::RESET}"
-      @output.puts panel.render_header(deck_title, badge, Theme.border_active)
+      deck_title = "#{Theme.title}▤ Opened Files#{Theme::RESET} #{Theme.meta_dim}(#{@opened_files.size} files · #{format_bytes(total_b)} · #{Theme.token_badge}#{format_tokens(total_tok)})#{Theme::RESET}"
+      @output.puts panel.render_header(deck_title, nil, Theme.border_active)
 
       max_deck_files = term_h <= 28 ? 4 : 8
       displayed_files = if @opened_files.size > max_deck_files
@@ -541,11 +540,11 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
 
         hi_line = [active_offset + effective_preview - 1, active_lines_count].min
         prev_title = if box_w < 70
-          "#{Theme.title_active}🔍 Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line})#{Theme::RESET}"
+          "#{Theme.title_active}⌕ Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line})#{Theme::RESET}"
         else
-          "#{Theme.title_active}🔍 Active Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
+          "#{Theme.title_active}⌕ Active Inspection:#{Theme::RESET} #{Theme.filename}#{active.path}#{Theme::RESET} #{Theme.meta_dim}(L#{active_offset}-L#{hi_line} of #{active_lines_count})#{Theme::RESET}"
         end
-        prev_badge = "#{Theme.token_badge}#{format_tokens(active.tokens)}#{Theme::RESET}"
+        prev_badge = "#{Theme.meta_dim}#{format_tokens(active.tokens)}#{Theme::RESET}"
         @output.puts panel.render_header(prev_title, prev_badge, Theme.border)
 
         code_lines = CodePreview.render(
@@ -562,9 +561,8 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
 
       # 3.5. System Events Card (Mutations, Shell Commands, Tool Outputs - Source of Truth)
       unless @system_messages.empty?
-        events_title = "#{Theme.title}⚡ System Events#{Theme::RESET} #{Theme.meta_dim}(#{@system_messages.size} event#{@system_messages.size == 1 ? "" : "s"})#{Theme::RESET}"
-        events_badge = box_w < 75 ? nil : "#{Theme.status_tag}SOURCE OF TRUTH#{Theme::RESET}"
-        @output.puts panel.render_header(events_title, events_badge, Theme.border_active)
+        events_title = "#{Theme.title}◈ System Events#{Theme::RESET} #{Theme.meta_dim}(#{@system_messages.size} event#{@system_messages.size == 1 ? "" : "s"})#{Theme::RESET}"
+        @output.puts panel.render_header(events_title, nil, Theme.border_active)
 
         max_events = if term_h <= 28
           3
@@ -599,7 +597,7 @@ def render_dashboard_inner(active_file : OpenedFile?, active_offset : Int32, act
 
       # Action label
       if action = action_label
-        @output.puts "  #{Theme.highlight}⚡ Action:#{Theme::RESET} #{action}"
+        @output.puts "  #{Theme.highlight}› Action:#{Theme::RESET} #{action}"
       end
       @output.flush
     end

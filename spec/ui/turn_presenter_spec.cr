@@ -340,7 +340,6 @@ describe Nightmare::UI::TurnPresenter do
 
     rendered = Salamander::UI::Panel.strip_ansi(io.to_s)
     rendered.should contain("System Events (1 event)")
-    rendered.should contain("SOURCE OF TRUTH")
     rendered.should contain("MUTATION: WRITE_FILE")
     rendered.should contain("chili/Seven_Health_Tracking.md")
     rendered.should contain("Turn Complete · 1 file modified (chili/Seven_Health_Tracking.md)")

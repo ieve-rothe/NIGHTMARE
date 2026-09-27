@@ -78,9 +78,9 @@ The system prompt dictates agent behavior. It cascades through 5 tiers:
 | 1 | CLI / Environment | `NIGHTMARE_THEME` |
 | 2 | Workspace Config | `settings.theme` |
 | 3 | Global Config | `settings.theme` |
-| 4 | Default | `cyberpunk` |
+| 4 | Default | `cupertino` |
 
-Available themes: `cyberpunk`, `outrun`, `phosphor`, `classic`.
+Available themes: `cupertino`, `apple`, `cyberpunk`, `outrun`, `phosphor`, `classic`.
 
 ### Markdown Formatting
 
@@ -104,7 +104,7 @@ Available themes: `cyberpunk`, `outrun`, `phosphor`, `classic`.
   "max_tokens": 4096,
   "command_timeout_seconds": 60,
   "max_iterations": 25,
-  "theme": "cyberpunk"
+  "theme": "cupertino"
 }
 ```
 
@@ -119,8 +119,10 @@ Available themes: `cyberpunk`, `outrun`, `phosphor`, `classic`.
 | `temperature` | Float | `0.2` | Randomness in model generation. |
 | `max_tokens` | Int | `4096` | Token generation limit per request. |
 | `command_timeout_seconds`| Int | `60` | Default timeout for shell execution. |
-| `max_iterations` | Int | `25` | Turn limit before forcing an agent pause. |
-| `theme` | String | `cyberpunk` | Active UI color profile. |
+| `max_iterations` | Int | `25` | Root agent turn limit before forcing a pause. |
+| `subagent_max_iterations` | Int | `15` | Default turn limit for spawned subagents and plan workers. |
+| `subagent_exit_interview` | Bool | `true` | Conducts an exit interview LLM pass with telemetry when subagents hit turn or loop limits. |
+| `theme` | String | `cupertino` | Active UI color profile. |
 
 ## Default Persona
 

@@ -146,9 +146,9 @@ Configures the execution pacing for autonomous plans and loops.
 ## UI and Preferences
 
 ### `/theme`
-Lists available UI themes or switches the active syntax formatting theme. Available themes: `cyberpunk`, `outrun`, `phosphor`, `classic`.
+Lists available UI themes or switches the active syntax formatting theme. Available themes: `cupertino`, `apple`, `cyberpunk`, `outrun`, `phosphor`, `classic`.
 ```bash
-/theme outrun
+/theme cupertino
 ```
 
 ### `/model`

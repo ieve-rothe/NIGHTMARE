@@ -13,7 +13,7 @@ NIGHTMARE uses a structured JSON configuration system. Settings are resolved usi
   "model": "qwen2.5-coder:7b",
   "api_url": "http://127.0.0.1:11434/api/chat",
   "temperature": 0.2,
-  "theme": "cyberpunk",
+  "theme": "cupertino",
   "markdown": true,
   "logging": true
 }
@@ -37,7 +37,7 @@ NIGHTMARE uses a structured JSON configuration system. Settings are resolved usi
 |---|---|---|---|
 | `markdown` | Bool | `true` | Enables rich markdown rendering in terminal outputs. |
 | `logging` | Bool | `true` | Toggles detailed execution logging. |
-| `theme` | String | `"cyberpunk"` | Color scheme for terminal UI and dashboard elements. |
+| `theme` | String | `"cupertino"` | Color scheme for terminal UI and dashboard elements. |
 | `max_dashboard_width` | Int32 | `105` | Maximum column width for UI rendering. |
 | `file_card_threshold_screens` | Float64 | `1.5` | Screen height ratio before truncating files into summary cards. |
 | `file_card_preview_lines` | Int32 | `8` | Number of preview lines to show in a minimized file card. |
@@ -76,7 +76,9 @@ NIGHTMARE uses a structured JSON configuration system. Settings are resolved usi
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| `max_iterations` | Int32 | `25` | Limit on consecutive autonomous tool-use turns per session. |
+| `max_iterations` | Int32 | `25` | Limit on consecutive autonomous tool-use turns per session for the root agent. |
+| `subagent_max_iterations` | Int32 | `15` | Default iteration limit for delegated subagents and plan items. |
+| `subagent_exit_interview` | Bool | `true` | Executes an in-thread exit interview synthesizing findings when a subagent is interrupted. |
 | `turn_soft_cap` | Int32 | `10` | Threshold for warning the user about prolonged execution loops. |
 | `turn_spend_cap_tokens` | Int32 | `200000` | Limit of tokens consumed per task reasoning loop. |
 | `loop_detect_threshold` | Int32 | `3` | Number of identical consecutive tool calls before aborting. |

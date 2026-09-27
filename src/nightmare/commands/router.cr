@@ -172,7 +172,7 @@ Available Slash Commands:
   /review          Inspect assembled prompt, pinned files, and token usage
   /recover [opt]   Inspect and restore context from failure/crash dumps
   /thinking        View model internal chain-of-thought from last turn
-  /theme [name]    Switch theme (cyberpunk, outrun, phosphor, classic)
+  /theme [name]    Switch theme (cupertino, apple, cyberpunk, outrun, phosphor, classic)
   /model [name]    Inspect or change the active LLM model
   /paste           Enter multi-line input paste mode (or """)
   /exit            Exit the session
@@ -187,7 +187,7 @@ HELP
           marker = (name == active) ? "● (active)" : "○"
           puts "  #{marker} #{name}"
         end
-        puts "\nUsage: /theme <name> (e.g. /theme outrun, /theme phosphor, /theme cyberpunk, /theme classic)"
+        puts "\nUsage: /theme <name> (e.g. /theme cupertino, /theme apple, /theme outrun, /theme phosphor, /theme cyberpunk, /theme classic)"
       else
         target = args.downcase
         begin
