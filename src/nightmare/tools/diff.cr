@@ -35,8 +35,8 @@ module Nightmare::Tools
       path : String = "file",
       context_lines : Int32 = 3
     ) : String
-      orig_lines = original.split('\n')
-      new_lines = updated.split('\n')
+      orig_lines = original.empty? ? [] of String : original.split('\n')
+      new_lines = updated.empty? ? [] of String : updated.split('\n')
 
       diff_ops = compute_lcs_diff(orig_lines, new_lines)
 
@@ -101,35 +101,108 @@ module Nightmare::Tools
       new_lines : Array(String),
       context_lines : Int32
     )
-      # For concise display, format as a single hunk or continuous diff
-      hunk_lines = [] of String
-      orig_line_num = 1
-      new_line_num = 1
-      orig_count = 0
-      new_count = 0
+      ctx = Math.max(0, context_lines)
 
-      diff_ops.each do |op|
-        case op[:type]
-        when :keep
-          hunk_lines << " #{op[:orig_line]}"
-          orig_count += 1
-          new_count += 1
-        when :del
-          hunk_lines << "-#{op[:orig_line]}"
-          orig_count += 1
-        when :add
-          hunk_lines << "+#{op[:new_line]}"
-          new_count += 1
-        end
+      # Annotate each operation with pre-operation line positions
+      cur_orig = 1
+      cur_new = 1
+      annotated = diff_ops.map do |op|
+        ob = cur_orig
+        nb = cur_new
+        formatted = case op[:type]
+                    when :keep
+                      cur_orig += 1
+                      cur_new += 1
+                      " #{op[:orig_line]}"
+                    when :del
+                      cur_orig += 1
+                      "-#{op[:orig_line]}"
+                    when :add
+                      cur_new += 1
+                      "+#{op[:new_line]}"
+                    else
+                      ""
+                    end
+
+        {
+          type:        op[:type],
+          orig_line:   op[:orig_line],
+          new_line:    op[:new_line],
+          orig_before: ob,
+          new_before:  nb,
+          formatted:   formatted,
+        }
       end
 
-      [{
-        orig_start: 1,
-        orig_count: orig_count,
-        new_start: 1,
-        new_count: new_count,
-        lines: hunk_lines
-      }]
+      # Find indices of all change operations
+      change_indices = [] of Int32
+      annotated.each_with_index do |item, idx|
+        change_indices << idx if item[:type] != :keep
+      end
+
+      return [] of NamedTuple(orig_start: Int32, orig_count: Int32, new_start: Int32, new_count: Int32, lines: Array(String)) if change_indices.empty?
+
+      # Group consecutive change indices into clusters when the keep gap between them <= 2 * ctx
+      clusters = [] of Array(Int32)
+      cur_cluster = [change_indices[0]]
+
+      (1...change_indices.size).each do |c_idx|
+        prev = change_indices[c_idx - 1]
+        curr = change_indices[c_idx]
+        keep_gap = curr - prev - 1
+        if keep_gap <= 2 * ctx
+          cur_cluster << curr
+        else
+          clusters << cur_cluster
+          cur_cluster = [curr]
+        end
+      end
+      clusters << cur_cluster
+
+      # Build each hunk from its cluster and surrounding context
+      hunks = [] of NamedTuple(orig_start: Int32, orig_count: Int32, new_start: Int32, new_count: Int32, lines: Array(String))
+
+      clusters.each do |cluster|
+        c_start = cluster.first
+        c_end = cluster.last
+
+        h_start = Math.max(0, c_start - ctx)
+        h_end = Math.min(annotated.size - 1, c_end + ctx)
+
+        orig_count = 0
+        new_count = 0
+        hunk_lines = [] of String
+
+        (h_start..h_end).each do |idx|
+          item = annotated[idx]
+          case item[:type]
+          when :keep
+            orig_count += 1
+            new_count += 1
+            hunk_lines << item[:formatted]
+          when :del
+            orig_count += 1
+            hunk_lines << item[:formatted]
+          when :add
+            new_count += 1
+            hunk_lines << item[:formatted]
+          end
+        end
+
+        start_item = annotated[h_start]
+        orig_start = orig_count == 0 ? start_item[:orig_before] - 1 : start_item[:orig_before]
+        new_start = new_count == 0 ? start_item[:new_before] - 1 : start_item[:new_before]
+
+        hunks << {
+          orig_start: orig_start,
+          orig_count: orig_count,
+          new_start:  new_start,
+          new_count:  new_count,
+          lines:      hunk_lines,
+        }
+      end
+
+      hunks
     end
   end
 end

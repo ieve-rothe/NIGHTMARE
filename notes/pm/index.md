@@ -15,6 +15,7 @@ This file tracks the status and priority of all development tickets for the `nig
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-023](notes/pm/closed/TKT-023-unified-diff-context-hunk-windowing.md) | Unified Diff Context Windowing and Hunk Pruning | User Interface & Tooling | Closed | Med | 2026-09-26 |
 | [TKT-022](notes/pm/closed/TKT-022-degenerate-loop-history-salvage-and-session-recovery.md) | Degenerate Loop History Salvage and /recover Session Restoration | Context & Harness Invariant Integrity | Closed | High | 2026-09-25 |
 | [TKT-021](notes/pm/closed/TKT-021-cooperative-cancellation-and-session-recovery-during-approval-prompts.md) | Cooperative Cancellation and Session Recovery during Approval Prompts | Harness Stability & Tool Ergonomics | Closed | High | 2026-09-25 |
 | [TKT-020](notes/pm/closed/TKT-020-subagent-context-shedding-and-loop-detection.md) | Subagent Context Resilience — In-Turn Shedding, Loop Detection, and Context Protection | Harness Stability & Subagents | Closed | High | 2026-09-25 |
