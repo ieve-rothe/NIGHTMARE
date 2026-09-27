@@ -227,8 +227,9 @@ module Nightmare::Tools
 
     private def build_spawn_subagent_tool : Mantle::Tools::Tool
       props = {
-        "task"           => Mantle::Tools::PropertyDefinition.new("string", "The concrete task or deliverable for the subagent to execute"),
-        "files_targeted" => Mantle::Tools::PropertyDefinition.new("string", "Optional comma-separated list of target files or globs permitted for mutation"),
+        "task"              => Mantle::Tools::PropertyDefinition.new("string", "The concrete task or deliverable for the subagent to execute"),
+        "files_targeted"    => Mantle::Tools::PropertyDefinition.new("string", "Optional comma-separated list of target files or globs permitted for mutation"),
+        "budget_iterations" => Mantle::Tools::PropertyDefinition.new("integer", "Optional maximum number of iterations/turns for this subagent"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["task"])
       func = Mantle::Tools::FunctionDefinition.new(
@@ -248,8 +249,11 @@ module Nightmare::Tools
           end
         end
 
+        raw_budget = args["budget_iterations"]? || args["max_iterations"]?
+        budget_iterations = raw_budget.try(&.as_i?) || raw_budget.try(&.as_i64?.try(&.to_i)) || raw_budget.try(&.as_s?.try(&.to_i?))
+
         if runner = @subagent_runner
-          runner.run_subagent(task, files_targeted)
+          runner.run_subagent(task, files_targeted, budget_iterations)
         else
           "[Subagent error: No subagent runner configured]"
         end

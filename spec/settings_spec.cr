@@ -19,6 +19,8 @@ describe Nightmare::Settings do
     settings.bulk_data_patterns.should eq(["*.jsonl", "*.log", "*.trace", "*.ndjson"])
     settings.bulk_data_max_lines.should eq(50)
     settings.max_iterations.should eq(25)
+    settings.subagent_max_iterations.should eq(15)
+    settings.subagent_exit_interview.should be_true
     settings.turn_soft_cap.should eq(10)
     settings.turn_spend_cap_tokens.should eq(200_000)
     settings.loop_detect_threshold.should eq(3)
@@ -59,6 +61,8 @@ describe Nightmare::Settings do
       parsed["bulk_data_patterns"].as_a.map(&.as_s).should eq(["*.jsonl", "*.log", "*.trace", "*.ndjson"])
       parsed["bulk_data_max_lines"].as_i.should eq(50)
       parsed["max_iterations"].as_i.should eq(25)
+      parsed["subagent_max_iterations"].as_i.should eq(15)
+      parsed["subagent_exit_interview"].as_bool.should be_true
       parsed["turn_soft_cap"].as_i.should eq(10)
       parsed["turn_spend_cap_tokens"].as_i.should eq(200_000)
       parsed["loop_detect_threshold"].as_i.should eq(3)
@@ -118,6 +122,8 @@ describe Nightmare::Settings do
       disk_json["markdown"].as_bool.should be_true
       disk_json["max_tokens"].as_i.should eq(4096)
       disk_json["max_iterations"].as_i.should eq(25)
+      disk_json["subagent_max_iterations"].as_i.should eq(15)
+      disk_json["subagent_exit_interview"].as_bool.should be_true
       disk_json["turn_soft_cap"].as_i.should eq(10)
     end
   end

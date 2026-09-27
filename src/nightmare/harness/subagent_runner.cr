@@ -103,6 +103,7 @@ module Nightmare::Harness
 
       subagent_tools = registry.build_subagent_tools
 
+      executed_tool_results = [] of Tuple(String, Hash(String, JSON::Any), String)
       wrapped_subagent_tools = subagent_tools.map do |tool|
         orig_handler = tool.handler
         wrapped = tool.dup
@@ -110,7 +111,9 @@ module Nightmare::Harness
           if cancelled?
             raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
           end
+          tool_name = tool.function.name
           res = orig_handler ? orig_handler.call(args) : ""
+          executed_tool_results << {tool_name, args, res}
           if cancelled?
             raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
           end
@@ -137,6 +140,7 @@ module Nightmare::Harness
       )
 
       tool_calls_count = 0
+      last_thinking : String? = nil
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
         if cancelled?
           raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
@@ -145,6 +149,9 @@ module Nightmare::Harness
           if calls = last_res.tool_calls
             tool_calls_count += calls.size
           end
+          if th = last_res.thinking
+            last_thinking = th
+          end
           if p = @pacer
             p.pace_turn
           end
@@ -152,7 +159,7 @@ module Nightmare::Harness
         tool_loop.on_iteration_hook(store).call(working_msgs, last_res)
       }
 
-      max_iterations = item.budget_iterations || @environment.settings.max_iterations
+      max_iterations = item.budget_iterations || @environment.settings.subagent_max_iterations
       overflow_retries_remaining = @environment.settings.context_overflow_retries
 
       tokens_used = 0
@@ -196,7 +203,17 @@ module Nightmare::Harness
               next
             else
               status = "failed"
-              summary = "Subagent error: Context length exceeded after emergency shedding"
+              summary = conduct_subagent_exit_interview(
+                reason: "Context length exceeded after emergency shedding",
+                store: store,
+                calibrator: calibrator,
+                files_touched: files_touched,
+                tool_calls_count: tool_calls_count,
+                last_thinking: last_thinking,
+                allow_llm: false,
+                raw_response: result.raw_response,
+                executed_tool_results: executed_tool_results
+              )
               break
             end
           end
@@ -204,7 +221,17 @@ module Nightmare::Harness
           # Check for loop circuit breaker trip
           if loop_detector.tripped? || (result.error == Mantle::StepError::ToolExecutionFailure && result.error_message.try(&.includes?("ERR_DEGENERATE_LOOP")))
             status = "failed"
-            summary = "Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}"
+            summary = conduct_subagent_exit_interview(
+              reason: "Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}",
+              store: store,
+              calibrator: calibrator,
+              files_touched: files_touched,
+              tool_calls_count: tool_calls_count,
+              last_thinking: last_thinking || result.thinking,
+              allow_llm: true,
+              raw_response: result.raw_response,
+              executed_tool_results: executed_tool_results
+            )
             break
           end
 
@@ -213,14 +240,33 @@ module Nightmare::Harness
             summary, proposed_items, proposed_targets = parse_subagent_output(raw_response, item.id)
           else
             status = "failed"
-            summary = "Subagent error: #{result.error}"
+            summary = conduct_subagent_exit_interview(
+              reason: "Subagent error: #{result.error}",
+              store: store,
+              calibrator: calibrator,
+              files_touched: files_touched,
+              tool_calls_count: tool_calls_count,
+              last_thinking: last_thinking || result.thinking,
+              allow_llm: (result.error == Mantle::StepError::MaxIterationsReached),
+              raw_response: result.raw_response,
+              executed_tool_results: executed_tool_results
+            )
           end
           break
         rescue ex : CancelledException
           raise ex
         rescue ex : SpendCapExceededException
           status = "failed"
-          summary = "Subagent spend cap exceeded: #{ex.message}"
+          summary = conduct_subagent_exit_interview(
+            reason: "Subagent spend cap exceeded: #{ex.message}",
+            store: store,
+            calibrator: calibrator,
+            files_touched: files_touched,
+            tool_calls_count: tool_calls_count,
+            last_thinking: last_thinking,
+            allow_llm: false,
+            executed_tool_results: executed_tool_results
+          )
           break
         rescue ex : Mantle::Clients::APIError
           if ex.context_overflow? && overflow_retries_remaining > 0
@@ -229,11 +275,29 @@ module Nightmare::Harness
             next
           end
           status = "failed"
-          summary = "Subagent exception: #{ex.message}"
+          summary = conduct_subagent_exit_interview(
+            reason: "Subagent exception: #{ex.message}",
+            store: store,
+            calibrator: calibrator,
+            files_touched: files_touched,
+            tool_calls_count: tool_calls_count,
+            last_thinking: last_thinking,
+            allow_llm: false,
+            executed_tool_results: executed_tool_results
+          )
           break
         rescue ex
           status = "failed"
-          summary = "Subagent exception: #{ex.message}"
+          summary = conduct_subagent_exit_interview(
+            reason: "Subagent exception: #{ex.message}",
+            store: store,
+            calibrator: calibrator,
+            files_touched: files_touched,
+            tool_calls_count: tool_calls_count,
+            last_thinking: last_thinking,
+            allow_llm: false,
+            executed_tool_results: executed_tool_results
+          )
           break
         end
       end
@@ -300,7 +364,7 @@ module Nightmare::Harness
         shed_keep_verbatim: @environment.settings.shed_keep_verbatim
       )
 
-      max_iterations = budget_iterations || @environment.settings.max_iterations
+      max_iterations = budget_iterations || @environment.settings.subagent_max_iterations
       telemetry = Nightmare::UI::SubagentTelemetry.new(
         task: task,
         max_iterations: max_iterations
@@ -311,6 +375,7 @@ module Nightmare::Harness
         tp.render_dashboard(action_label: "Subagent spawned")
       end
 
+      executed_tool_results = [] of Tuple(String, Hash(String, JSON::Any), String)
       wrapped_subagent_tools = subagent_tools.map do |tool|
         orig_handler = tool.handler
         wrapped = tool.dup
@@ -326,6 +391,7 @@ module Nightmare::Harness
           telemetry.files_touched = files_touched.dup
 
           res = orig_handler ? orig_handler.call(args) : ""
+          executed_tool_results << {tool_name, args, res}
           if tp
             tp.present_tool_result(tool_name, args, res)
           end
@@ -339,6 +405,7 @@ module Nightmare::Harness
       end
 
       tool_calls_count = 0
+      last_thinking : String? = nil
       on_iteration = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
         if cancelled?
           raise Nightmare::Harness::CancelledException.new("Turn cancelled by user interrupt")
@@ -350,6 +417,7 @@ module Nightmare::Harness
           end
           if th = last_res.thinking
             telemetry.last_thought = th
+            last_thinking = th
           end
           telemetry.iteration += 1
           telemetry.files_touched = files_touched.dup
@@ -392,13 +460,33 @@ module Nightmare::Harness
               recover_from_context_overflow(store, calibrator)
               next
             else
-              return "[Subagent error: Context length exceeded after emergency shedding]"
+              return conduct_subagent_exit_interview(
+                reason: "Context length exceeded after emergency shedding",
+                store: store,
+                calibrator: calibrator,
+                files_touched: files_touched,
+                tool_calls_count: tool_calls_count,
+                last_thinking: last_thinking,
+                allow_llm: false,
+                raw_response: result.raw_response,
+                executed_tool_results: executed_tool_results
+              )
             end
           end
 
           # Check for loop circuit breaker trip
           if loop_detector.tripped? || (result.error == Mantle::StepError::ToolExecutionFailure && result.error_message.try(&.includes?("ERR_DEGENERATE_LOOP")))
-            return "[Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}]"
+            return conduct_subagent_exit_interview(
+              reason: "Subagent loop circuit breaker tripped: #{loop_detector.last_refusal || result.error_message || "ERR_DEGENERATE_LOOP"}",
+              store: store,
+              calibrator: calibrator,
+              files_touched: files_touched,
+              tool_calls_count: tool_calls_count,
+              last_thinking: last_thinking || result.thinking,
+              allow_llm: true,
+              raw_response: result.raw_response,
+              executed_tool_results: executed_tool_results
+            )
           end
 
           if result.ok?
@@ -413,17 +501,54 @@ module Nightmare::Harness
               io << summary
             end
           else
-            return "[Subagent error: #{result.error}]"
+            return conduct_subagent_exit_interview(
+              reason: "Subagent error: #{result.error}",
+              store: store,
+              calibrator: calibrator,
+              files_touched: files_touched,
+              tool_calls_count: tool_calls_count,
+              last_thinking: last_thinking || result.thinking,
+              allow_llm: (result.error == Mantle::StepError::MaxIterationsReached),
+              raw_response: result.raw_response,
+              executed_tool_results: executed_tool_results
+            )
           end
         end
       rescue ex : CancelledException
         raise ex
       rescue ex : SpendCapExceededException
-        "[Subagent spend cap exceeded: #{ex.message}]"
+        conduct_subagent_exit_interview(
+          reason: "Subagent spend cap exceeded: #{ex.message}",
+          store: store,
+          calibrator: calibrator,
+          files_touched: files_touched,
+          tool_calls_count: tool_calls_count,
+          last_thinking: last_thinking,
+          allow_llm: false,
+          executed_tool_results: executed_tool_results
+        )
       rescue ex : Mantle::Clients::APIError
-        "[Subagent API error: #{ex.message}]"
+        conduct_subagent_exit_interview(
+          reason: "Subagent API error: #{ex.message}",
+          store: store,
+          calibrator: calibrator,
+          files_touched: files_touched,
+          tool_calls_count: tool_calls_count,
+          last_thinking: last_thinking,
+          allow_llm: false,
+          executed_tool_results: executed_tool_results
+        )
       rescue ex
-        "[Subagent exception: #{ex.message}]"
+        conduct_subagent_exit_interview(
+          reason: "Subagent exception: #{ex.message}",
+          store: store,
+          calibrator: calibrator,
+          files_touched: files_touched,
+          tool_calls_count: tool_calls_count,
+          last_thinking: last_thinking,
+          allow_llm: false,
+          executed_tool_results: executed_tool_results
+        )
       ensure
         if tp
           tp.active_subagent = nil
@@ -568,6 +693,245 @@ module Nightmare::Harness
         trimmed = line.strip.lstrip('-').lstrip('*').strip
         next if trimmed.empty?
         result << trimmed
+      end
+    end
+
+    private def conduct_subagent_exit_interview(
+      reason : String,
+      store : Context::SlidingStore,
+      calibrator : Context::TokenEstimator,
+      files_touched : Array(String),
+      tool_calls_count : Int32,
+      last_thinking : String? = nil,
+      allow_llm : Bool = true,
+      raw_response : Mantle::Clients::Response? = nil,
+      executed_tool_results : Array(Tuple(String, Hash(String, JSON::Any), String)) = [] of Tuple(String, Hash(String, JSON::Any), String)
+    ) : String
+      active = store.active_turn
+      return "[Subagent error: #{reason}]" unless active
+
+      sync_last_iteration(active, raw_response, executed_tool_results)
+      effective_tool_calls_count = Math.max(tool_calls_count, executed_tool_results.size)
+
+      files_inspected = Set(String).new
+      commands_run = [] of String
+      last_action : String? = nil
+      last_thought : String? = last_thinking
+
+      executed_tool_results.each do |record|
+        t_name, t_args, _ = record
+        args_summary = t_args.map { |k, v| "#{k}: #{v}" }.join(", ")
+        last_action = "#{t_name}(#{args_summary})"
+        if t_name == "read_file" || t_name == "file_info" || t_name == "replace_in_file" || t_name == "append_to_file"
+          if p = t_args["path"]?.try(&.as_s?) || t_args["file"]?.try(&.as_s?)
+            files_inspected << p
+          end
+        elsif t_name == "run_command"
+          if cmd = t_args["command"]?.try(&.as_s?)
+            commands_run << cmd
+          end
+        end
+      end
+
+      active.messages.each do |msg|
+        if tcs = msg.tool_calls
+          tcs.each do |tc|
+            fn_name = tc.function.name
+            args_str = tc.function.arguments
+            last_action ||= "#{fn_name}(#{args_str})"
+            begin
+              if parsed = JSON.parse(args_str).as_h?
+                if p = parsed["path"]?.try(&.as_s?) || parsed["file"]?.try(&.as_s?)
+                  files_inspected << p
+                end
+                if cmd = parsed["command"]?.try(&.as_s?)
+                  commands_run << cmd
+                end
+              end
+            rescue
+            end
+          end
+        elsif msg.role == "assistant" && (cnt = msg.content)
+          last_thought ||= cnt unless cnt.empty?
+        end
+      end
+
+      # Seal any unclosed tool calls to prevent API 400 errors
+      seal_open_tool_calls(active, reason)
+
+      if allow_llm && @environment.settings.subagent_exit_interview
+        begin
+          # Check context headroom: emergency shed if close to hardmax
+          hardmax = store.hardmax
+          total_chars = active.messages.sum { |m| (m.content || "").size }
+          estimated = calibrator.estimate(total_chars)
+          if estimated > (hardmax.to_f * 0.75).to_i
+            Context::Shedder.shed_active_turn!(
+              active,
+              current_tokens: estimated,
+              hardmax: hardmax,
+              trigger_ratio: 0.5,
+              keep_chars: 50,
+              keep_verbatim: 1,
+              calibrator: calibrator
+            )
+          end
+
+          interview_prompt = String.build do |io|
+            io << "[SUPERVISOR INTERVENTION - PENCILS DOWN]\n"
+            io << "Your execution budget has ended (" << reason << "). Do NOT attempt to invoke any tools.\n"
+            io << "Provide an immediate Exit Summary for the parent agent:\n"
+            io << "1. Progress & Discoveries: What key facts, files, or answers did you find?\n"
+            io << "2. Actions Taken: Which files or lines did you inspect or edit?\n"
+            io << "3. Blockers & Unfinished Work: Where did you get stuck or run out of turns?\n"
+            io << "4. Recommendation: What concrete next step should the parent agent take?"
+          end
+
+          interview_messages = active.messages.dup
+          interview_messages << Mantle::Message.new("user", interview_prompt)
+
+          interview_res = @client.execute(interview_messages, tools: nil)
+          if content = interview_res.content
+            clean_content = content.strip
+            unless clean_content.empty?
+              return String.build do |io|
+                io << format_subagent_header(reason, effective_tool_calls_count, files_touched) << "\n\n"
+                unless files_inspected.empty?
+                  io << "Files inspected: " << files_inspected.join(", ") << "\n"
+                end
+                if last_action
+                  io << "Last action: " << last_action << "\n"
+                end
+                io << "\n### Subagent Exit Report:\n" << clean_content
+              end
+            end
+          end
+        rescue ex
+          # If LLM interview fails (API error, timeout, etc.), fall through to deterministic post-mortem
+        end
+      end
+
+      build_deterministic_post_mortem(
+        reason: reason,
+        files_inspected: files_inspected.to_a,
+        files_touched: files_touched,
+        commands_run: commands_run,
+        tool_calls_count: effective_tool_calls_count,
+        last_action: last_action,
+        last_thought: last_thought
+      )
+    end
+
+    private def sync_last_iteration(
+      active : Context::Turn,
+      raw_response : Mantle::Clients::Response?,
+      executed_tool_results : Array(Tuple(String, Hash(String, JSON::Any), String))
+    ) : Nil
+      return unless resp = raw_response
+      return unless tcs = resp.tool_calls
+      return if tcs.empty?
+
+      already_synced = active.messages.reverse.any? do |m|
+        m.role == "assistant" && m.tool_calls.try(&.any? { |tc| tcs.any? { |target| target.id == tc.id } })
+      end
+
+      unless already_synced
+        active.append_assistant(Mantle::Message.new(
+          role: "assistant",
+          content: resp.content,
+          tool_calls: tcs
+        ))
+      end
+
+      tcs.each do |tc|
+        already_has_tool_msg = active.messages.any? { |m| m.role == "tool" && m.tool_call_id == tc.id }
+        next if already_has_tool_msg
+
+        matching_idx = executed_tool_results.rindex { |record| record[0] == tc.function.name }
+        tool_content = if matching_idx
+          executed_tool_results[matching_idx][2]
+        else
+          %({"error":"Execution halted before tool response","refused":true})
+        end
+
+        active.messages << Mantle::Message.new(
+          role: "tool",
+          content: tool_content,
+          tool_call_id: tc.id
+        )
+      end
+    end
+
+    private def seal_open_tool_calls(active : Context::Turn, reason : String) : Nil
+      open_calls = Set(String).new
+      active.messages.each_with_index do |m, idx|
+        next if idx == 0
+        if m.role == "assistant"
+          if tcs = m.tool_calls
+            tcs.each { |tc| open_calls.add(tc.id) }
+          end
+        elsif m.role == "tool"
+          if tid = m.tool_call_id
+            open_calls.delete(tid)
+          end
+        end
+      end
+
+      open_calls.each do |unclosed_id|
+        active.messages << Mantle::Message.new(
+          role: "tool",
+          content: %({"error":"Execution halted before tool response: #{reason}","refused":true}),
+          tool_call_id: unclosed_id
+        )
+      end
+    end
+
+    private def format_subagent_header(reason : String, tool_calls_count : Int32, files_touched : Array(String)) : String
+      prefix = if reason.starts_with?("Subagent loop circuit breaker tripped:") ||
+                  reason.starts_with?("Subagent spend cap exceeded:") ||
+                  reason.starts_with?("Subagent error:") ||
+                  reason.starts_with?("Subagent exception:") ||
+                  reason.starts_with?("Subagent API error:")
+        reason
+      else
+        "Subagent error: #{reason}"
+      end
+
+      String.build do |io|
+        io << "[" << prefix << "]"
+        io << " (" << tool_calls_count << " tool call" << (tool_calls_count == 1 ? "" : "s")
+        unless files_touched.empty?
+          io << ", files modified: " << files_touched.uniq.join(", ")
+        end
+        io << ")"
+      end
+    end
+
+    private def build_deterministic_post_mortem(
+      reason : String,
+      files_inspected : Array(String),
+      files_touched : Array(String),
+      commands_run : Array(String),
+      tool_calls_count : Int32,
+      last_action : String?,
+      last_thought : String?
+    ) : String
+      String.build do |io|
+        io << format_subagent_header(reason, tool_calls_count, files_touched) << "\n\n"
+        io << "### Subagent Telemetry Post-Mortem:\n"
+        unless files_inspected.empty?
+          io << "- Files inspected: " << files_inspected.join(", ") << "\n"
+        end
+        unless commands_run.empty?
+          io << "- Commands run: " << commands_run.last(3).join("; ") << "\n"
+        end
+        if last_action
+          io << "- Last action: " << last_action << "\n"
+        end
+        if last_thought && !last_thought.strip.empty?
+          thought_snippet = last_thought.lines.map(&.strip).reject(&.empty?).first(3).join(" ")
+          io << "- Last thought: " << thought_snippet << "\n"
+        end
       end
     end
   end

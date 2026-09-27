@@ -382,6 +382,30 @@ PY
       end
     end
 
+    it "forwards budget_iterations from tool args to runner" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "[SUMMARY]\nDone in budget", tool_calls: nil)
+        ])
+        runner = Nightmare::Harness::SubagentRunner.new(client, env)
+        registry = Nightmare::Tools::Registry.new(guard, client, subagent_runner: runner)
+
+        tool = registry.build_tools.find { |t| t.function.name == "spawn_subagent" }
+        tool.should_not be_nil
+
+        props = tool.not_nil!.function.parameters.properties
+        props.has_key?("budget_iterations").should be_true
+
+        result = tool.not_nil!.execute({
+          "task" => JSON::Any.new("test budget"),
+          "budget_iterations" => JSON::Any.new(3_i64)
+        })
+        result.should contain("Done in budget")
+      end
+    end
+
     it "encapsulates runner exceptions into result string" do
       with_temp_dir do |root|
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)

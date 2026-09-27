@@ -475,4 +475,152 @@ describe Nightmare::Harness::SubagentRunner do
       end
     end
   end
+
+  describe "Subagent Iteration Budgets & Exit Interview" do
+    it "honors dynamic budget_iterations and conducts exit interview on MaxIterationsReached" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        File.write(File.join(temp_dir, "doc1.txt"), "hello doc1")
+        File.write(File.join(temp_dir, "doc2.txt"), "hello doc2")
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc1.txt"}))
+        )
+        call2 = Mantle::Clients::ToolCall.new(
+          id: "call_2",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc2.txt"}))
+        )
+
+        # Call 1: tool call 1
+        # Call 2: tool call 2 (reaches max_iterations = 2)
+        # Call 3: Exit interview response
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Reading doc2 now", tool_calls: [call2]),
+          Mantle::Clients::Response.new(content: "I read doc1.txt and doc2.txt. Discovered key configurations.", tool_calls: nil),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Investigate docs", budget_iterations: 2)
+
+        result.should contain("[Subagent error: MaxIterationsReached]")
+        result.should contain("Files inspected: doc1.txt, doc2.txt")
+        result.should contain("### Subagent Exit Report:")
+        result.should contain("I read doc1.txt and doc2.txt. Discovered key configurations.")
+
+        # Ensure 3 calls were made (2 step iterations + 1 exit interview)
+        client.call_count.should eq(3)
+        # Exit interview call had interview prompt
+        recorded_messages = client.recorded_messages.last
+        recorded_messages.last.role.should eq("user")
+        recorded_messages.last.content.not_nil!.should contain("SUPERVISOR INTERVENTION - PENCILS DOWN")
+      end
+    end
+
+    it "falls back to deterministic telemetry post-mortem when LLM exit interview fails" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        File.write(File.join(temp_dir, "doc1.txt"), "content")
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc1.txt"}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+        ])
+        # Call 2 (exit interview) raises API exception
+        client.raise_on_call[2] = Exception.new("Inference gateway timeout")
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Scan doc", budget_iterations: 1)
+
+        result.should contain("[Subagent error: MaxIterationsReached]")
+        result.should contain("### Subagent Telemetry Post-Mortem:")
+        result.should contain("- Files inspected: doc1.txt")
+      end
+    end
+
+    it "uses deterministic telemetry post-mortem immediately when subagent_exit_interview is disabled" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        env.settings.subagent_exit_interview = false
+        File.write(File.join(temp_dir, "doc1.txt"), "content")
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"doc1.txt"}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Scan doc", budget_iterations: 1)
+
+        result.should contain("[Subagent error: MaxIterationsReached]")
+        result.should contain("### Subagent Telemetry Post-Mortem:")
+        result.should contain("- Files inspected: doc1.txt")
+        # No extra LLM call was executed
+        client.call_count.should eq(1)
+      end
+    end
+
+    it "seals open tool calls so exit interview messages are well-formed" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_open_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"unresolved.cr"}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Exit summary generated", tool_calls: nil),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Inspect unresolved", budget_iterations: 1)
+
+        result.should contain("Exit summary generated")
+
+        # Verify the interview messages sent to client have call_open_1 sealed by a tool message
+        interview_msgs = client.recorded_messages.last
+        tool_resp1 = interview_msgs.find { |m| m.role == "tool" && m.tool_call_id == "call_open_1" }
+        tool_resp1.should_not be_nil
+        tool_resp1.not_nil!.content.not_nil!.should contain("unresolved.cr")
+      end
+    end
+
+    it "honors subagent_max_iterations and conducts exit interview in dispatch" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(root_path: temp_dir, ensure_dirs: false)
+        env.settings.subagent_max_iterations = 1
+        File.write(File.join(temp_dir, "file.cr"), "class Foo; end")
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_disp_1",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"file.cr"}))
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Dispatch exit summary: Foo class located.", tool_calls: nil),
+        ])
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        item = Nightmare::Plan::PlanItem.new(id: "item-budget", title: "Find Foo")
+        run = Nightmare::Plan::PlanRun.new(run_id: "run-1", plan_id: "test-plan")
+
+        outcome = runner.dispatch(item, run, temp_dir)
+        outcome[:status].should eq("failed")
+        outcome[:summary].should contain("[Subagent error: MaxIterationsReached]")
+        outcome[:summary].should contain("Files inspected: file.cr")
+        outcome[:summary].should contain("Dispatch exit summary: Foo class located.")
+      end
+    end
+  end
 end

@@ -21,6 +21,8 @@ module Nightmare
     property max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS
     property tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES
     property max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS
+    property subagent_max_iterations : Int32 = Nightmare::Config::SUBAGENT_MAX_ITERATIONS
+    property subagent_exit_interview : Bool = Nightmare::Config::SUBAGENT_EXIT_INTERVIEW
     property turn_soft_cap : Int32 = Nightmare::Config::TURN_SOFT_CAP
     property turn_spend_cap_tokens : Int32 = Nightmare::Config::TURN_SPEND_CAP_TOKENS
     property loop_detect_threshold : Int32 = Nightmare::Config::LOOP_DETECT_THRESHOLD
@@ -55,6 +57,8 @@ module Nightmare
       @max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
       @tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES,
       @max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS,
+      @subagent_max_iterations : Int32 = Nightmare::Config::SUBAGENT_MAX_ITERATIONS,
+      @subagent_exit_interview : Bool = Nightmare::Config::SUBAGENT_EXIT_INTERVIEW,
       @turn_soft_cap : Int32 = Nightmare::Config::TURN_SOFT_CAP,
       @turn_spend_cap_tokens : Int32 = Nightmare::Config::TURN_SPEND_CAP_TOKENS,
       @loop_detect_threshold : Int32 = Nightmare::Config::LOOP_DETECT_THRESHOLD,
