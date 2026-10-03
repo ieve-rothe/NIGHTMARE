@@ -197,6 +197,7 @@ module Nightmare::Integration
     @running : Bool = false
     @handlers : Array(Proc(HTTP::Server::Context, Bool))
     @mutex : Mutex = Mutex.new
+    @call_counter : Atomic(Int64) = Atomic(Int64).new(0_i64)
 
     def initialize
       @requests = [] of NamedTuple(path: String, method: String, body: String)
@@ -305,7 +306,7 @@ module Nightmare::Integration
               content: "",
               tool_calls: [
                 {
-                  id: "call_#{Time.utc.to_unix_ms}",
+                  id: "call_#{Time.utc.to_unix_ns}_#{@call_counter.add(1)}",
                   function: {
                     name: tool_name,
                     arguments: tool_args
@@ -419,6 +420,8 @@ module Nightmare::Integration
     def send_line(line : String) : Nil
       @process.input.puts(line)
       @process.input.flush
+    rescue ex : IO::Error
+      raise IO::Error.new("Broken pipe sending '#{line}'. Terminated? #{@process.terminated?}. Exit code: #{@process.wait.exit_code rescue nil}. Stderr:\n#{stderr}\nStdout:\n#{stdout}")
     end
 
     def send_chars(chars : String) : Nil
@@ -606,7 +609,7 @@ module Nightmare::Integration
       raise "Nightmare terminated on boot! Exit code: #{proc.wait.exit_code}. Stderr:\n#{session.stderr}"
     end
 
-    session.wait_for(/(?:>|❯|▶)/, timeout: 5.seconds) rescue nil
+    session.wait_for(/(?:>|❯|▶|›)/, timeout: 5.seconds) rescue nil
     session
   end
 

@@ -1,4 +1,5 @@
 require "spec"
+ENV["NIGHTMARE_PROCESS_GRACE_MS"] ||= "50"
 require "../src/nightmare"
 require "file_utils"
 
