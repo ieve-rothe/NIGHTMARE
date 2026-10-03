@@ -28,6 +28,8 @@ module Nightmare::Workspace
     getter workspace_keys_dir : String
     getter manifest : Manifest
     getter settings : Settings
+    getter readable_directories : Array(String)
+    getter writable_directories : Array(String)
     getter? ensure_dirs : Bool
     getter? no_log : Bool
 
@@ -49,7 +51,9 @@ module Nightmare::Workspace
       xdg_state_home : String? = nil,
       xdg_cache_home : String? = nil,
       @ensure_dirs : Bool = true,
-      @no_log : Bool = false
+      @no_log : Bool = false,
+      cli_readable_directories : Array(String)? = nil,
+      cli_writable_directories : Array(String)? = nil
     )
       @root = File.realpath(root_path)
 
@@ -98,6 +102,102 @@ module Nightmare::Workspace
         repo_root: @root,
         ensure_dirs: ensure_dirs
       )
+
+      raw_dirs = [] of String
+      raw_dirs.concat(@settings.readable_directories)
+
+      raw_w_dirs = [] of String
+      raw_w_dirs.concat(@settings.writable_directories)
+
+      global_config_file = File.join(@global_config_dir, "config.json")
+      if File.exists?(global_config_file)
+        begin
+          global_json = JSON.parse(File.read(global_config_file))
+          if global_read_dirs = global_json["readable_directories"]?.try(&.as_a?)
+            global_read_dirs.each do |v|
+              raw_dirs << v.as_s if v.as_s?
+            end
+          end
+          if global_write_dirs = (global_json["writable_directories"]? || global_json["writeable_directories"]?).try(&.as_a?)
+            global_write_dirs.each do |v|
+              raw_w_dirs << v.as_s if v.as_s?
+            end
+          end
+        rescue
+        end
+      end
+
+      if env_dirs = ENV["NIGHTMARE_READABLE_DIRS"]?
+        raw_dirs.concat(env_dirs.split(':').reject(&.empty?))
+      end
+
+      if env_w_dirs = ENV["NIGHTMARE_WRITABLE_DIRS"]? || ENV["NIGHTMARE_WRITEABLE_DIRS"]?
+        raw_w_dirs.concat(env_w_dirs.split(':').reject(&.empty?))
+      end
+
+      if cli_dirs = cli_readable_directories
+        raw_dirs.concat(cli_dirs)
+      end
+
+      if cli_w_dirs = cli_writable_directories
+        raw_w_dirs.concat(cli_w_dirs)
+      end
+
+      resolved_dirs = [] of String
+      raw_dirs.each do |dir|
+        trimmed = dir.strip
+        next if trimmed.empty?
+        expanded = if trimmed.starts_with?("~")
+          trimmed == "~" ? home : File.join(home, trimmed[1..].lstrip('/'))
+        elsif Path.new(trimmed).absolute?
+          File.expand_path(trimmed)
+        else
+          File.expand_path(trimmed, @root)
+        end
+
+        begin
+          if File.exists?(expanded)
+            canonical = File.realpath(expanded)
+            resolved_dirs << canonical unless resolved_dirs.includes?(canonical)
+          else
+            resolved_dirs << expanded unless resolved_dirs.includes?(expanded)
+          end
+        rescue
+          resolved_dirs << expanded unless resolved_dirs.includes?(expanded)
+        end
+      end
+
+      resolved_w_dirs = [] of String
+      raw_w_dirs.each do |dir|
+        trimmed = dir.strip
+        next if trimmed.empty?
+        expanded = if trimmed.starts_with?("~")
+          trimmed == "~" ? home : File.join(home, trimmed[1..].lstrip('/'))
+        elsif Path.new(trimmed).absolute?
+          File.expand_path(trimmed)
+        else
+          File.expand_path(trimmed, @root)
+        end
+
+        begin
+          if File.exists?(expanded)
+            canonical = File.realpath(expanded)
+            resolved_w_dirs << canonical unless resolved_w_dirs.includes?(canonical)
+          else
+            resolved_w_dirs << expanded unless resolved_w_dirs.includes?(expanded)
+          end
+        rescue
+          resolved_w_dirs << expanded unless resolved_w_dirs.includes?(expanded)
+        end
+      end
+
+      # All writable directories are also readable by invariant
+      resolved_w_dirs.each do |w_dir|
+        resolved_dirs << w_dir unless resolved_dirs.includes?(w_dir)
+      end
+
+      @readable_directories = resolved_dirs
+      @writable_directories = resolved_w_dirs
     end
 
     def self.resolve(
@@ -106,7 +206,9 @@ module Nightmare::Workspace
       xdg_state_home : String? = nil,
       xdg_cache_home : String? = nil,
       ensure_dirs : Bool = true,
-      no_log : Bool = false
+      no_log : Bool = false,
+      cli_readable_directories : Array(String)? = nil,
+      cli_writable_directories : Array(String)? = nil
     ) : Environment
       unless Dir.exists?(current_dir) || File.exists?(current_dir)
         raise ArgumentError.new("Workspace directory does not exist: #{current_dir}")
@@ -118,7 +220,9 @@ module Nightmare::Workspace
         xdg_state_home: xdg_state_home,
         xdg_cache_home: xdg_cache_home,
         ensure_dirs: ensure_dirs,
-        no_log: no_log
+        no_log: no_log,
+        cli_readable_directories: cli_readable_directories,
+        cli_writable_directories: cli_writable_directories
       )
     end
 
@@ -129,10 +233,56 @@ module Nightmare::Workspace
       false
     end
 
+    def path_inside_readable?(resolved_path : String) : Bool
+      return true if path_inside_root?(resolved_path)
+      @readable_directories.any? do |dir|
+        prefix = dir.ends_with?('/') ? dir : "#{dir}/"
+        resolved_path == dir || resolved_path.starts_with?(prefix)
+      end
+    end
+
+    def inside_readable?(path : String) : Bool
+      resolved = resolve_contained_path(path)
+      path_inside_readable?(resolved)
+    rescue SecurityError | File::Error
+      false
+    end
+
+    def path_inside_writable?(resolved_path : String) : Bool
+      return true if path_inside_root?(resolved_path)
+      @writable_directories.any? do |dir|
+        prefix = dir.ends_with?('/') ? dir : "#{dir}/"
+        resolved_path == dir || resolved_path.starts_with?(prefix)
+      end
+    end
+
+    def inside_writable?(path : String) : Bool
+      resolved = resolve_contained_path(path)
+      path_inside_writable?(resolved)
+    rescue SecurityError | File::Error
+      false
+    end
+
     def sanitize_path(path : String) : String
       resolved = resolve_contained_path(path)
       unless path_inside_root?(resolved)
         raise SecurityError.new("Path traversal violation: target \"#{path}\" resolves to \"#{resolved}\" outside root \"#{@root}\"")
+      end
+      resolved
+    end
+
+    def sanitize_read_path(path : String) : String
+      resolved = resolve_contained_path(path)
+      unless path_inside_readable?(resolved)
+        raise SecurityError.new("Path traversal violation: target \"#{path}\" resolves to \"#{resolved}\" outside root \"#{@root}\" and configured readable directories")
+      end
+      resolved
+    end
+
+    def sanitize_write_path(path : String) : String
+      resolved = resolve_contained_path(path)
+      unless path_inside_writable?(resolved)
+        raise SecurityError.new("Path traversal violation: target \"#{path}\" resolves to \"#{resolved}\" outside root \"#{@root}\" and configured writable directories")
       end
       resolved
     end
@@ -162,11 +312,24 @@ module Nightmare::Workspace
         config_disp += "/" unless config_disp.ends_with?("/")
         state_disp += "/" unless state_disp.ends_with?("/")
 
-        [
+        res = [
           l1,
           "Config    : #{config_disp}",
           "State/Logs: #{state_disp}",
         ]
+        unless @readable_directories.empty?
+          readable_disp = @readable_directories.map do |d|
+            d.starts_with?(home) ? "~" + d[home.size..] : d
+          end.join(", ")
+          res << "Read Dirs : #{readable_disp}"
+        end
+        unless @writable_directories.empty?
+          writable_disp = @writable_directories.map do |d|
+            d.starts_with?(home) ? "~" + d[home.size..] : d
+          end.join(", ")
+          res << "Write Dirs: #{writable_disp}"
+        end
+        res
       end
 
       content_width = [72, lines.map(&.size).max].max

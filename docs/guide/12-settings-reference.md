@@ -27,6 +27,7 @@ NIGHTMARE uses a structured JSON configuration system. Settings are resolved usi
 |---|---|---|---|
 | `model` | String | `"qwen2.5-coder:7b"` | Name of the model to use for completion requests. |
 | `api_url` | String | `"http://127.0.0.1:11434/api/chat"` | Endpoint for the LLM inference server. |
+| `keep_alive` | String | `"15m"` | Duration to keep model loaded in memory after last request (e.g. `"15m"`, `"30m"`, `"-1"`). |
 | `temperature` | Float64 | `0.2` | Sampling temperature for model output generation. |
 | `top_p` | Float64 | `0.95` | Nucleus sampling probability threshold. |
 | `max_tokens` | Int32 | `4096` | Maximum number of tokens to generate per request. |
@@ -61,6 +62,8 @@ NIGHTMARE uses a structured JSON configuration system. Settings are resolved usi
 | `command_timeout_seconds` | Int32 | `60` | Timeout before sending a synchronous shell command to the background. |
 | `max_command_timeout_seconds` | Int32 | `600` | Absolute maximum runtime for execution before hard termination. |
 | `tool_output_max_bytes` | Int32 | `24576` | Truncation threshold for tool stdout/stderr buffers. |
+| `readable_directories` | Array(String) | `[]` | External directories permitted for read-only inspection and context pinning. |
+| `writable_directories` | Array(String) | `[]` | External directories permitted for file mutations (automatically readable; alias: `writeable_directories`). |
 | `bulk_data_patterns` | Array(String) | `["*.jsonl", "*.log", "*.trace", "*.ndjson"]` | Glob patterns identifying high-volume log and data files. |
 | `bulk_data_max_lines` | Int32 | `50` | Line limit enforced when reading files matching bulk patterns. |
 

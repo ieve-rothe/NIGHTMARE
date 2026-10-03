@@ -12,6 +12,7 @@ module Nightmare
 
     property model : String = Nightmare::Config::DEFAULT_MODEL
     property api_url : String = "http://127.0.0.1:11434/api/chat"
+    property keep_alive : String = Nightmare::Config::DEFAULT_KEEP_ALIVE
     property markdown : Bool = true
     property logging : Bool = true
     property temperature : Float64 = 0.2
@@ -20,6 +21,7 @@ module Nightmare
     property command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_TIMEOUT_SECONDS
     property max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS
     property tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES
+    property list_files_max_results : Int32 = Nightmare::Config::DEFAULT_LIST_FILES_MAX_RESULTS
     property max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS
     property subagent_max_iterations : Int32 = Nightmare::Config::SUBAGENT_MAX_ITERATIONS
     property subagent_exit_interview : Bool = Nightmare::Config::SUBAGENT_EXIT_INTERVIEW
@@ -44,10 +46,21 @@ module Nightmare
     property file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES
     property max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH
     property theme : String = Nightmare::Config::DEFAULT_THEME
+    property readable_directories : Array(String) = [] of String
+    property writable_directories : Array(String) = [] of String
+
+    def writeable_directories : Array(String)
+      @writable_directories
+    end
+
+    def writeable_directories=(val : Array(String))
+      @writable_directories = val
+    end
 
     def initialize(
       @model : String = Nightmare::Config::DEFAULT_MODEL,
       @api_url : String = "http://127.0.0.1:11434/api/chat",
+      @keep_alive : String = Nightmare::Config::DEFAULT_KEEP_ALIVE,
       @markdown : Bool = true,
       @logging : Bool = true,
       @temperature : Float64 = 0.2,
@@ -56,6 +69,7 @@ module Nightmare
       @command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_TIMEOUT_SECONDS,
       @max_command_timeout_seconds : Int32 = Nightmare::Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
       @tool_output_max_bytes : Int32 = Nightmare::Config::TOOL_OUTPUT_MAX_BYTES,
+      @list_files_max_results : Int32 = Nightmare::Config::DEFAULT_LIST_FILES_MAX_RESULTS,
       @max_iterations : Int32 = Nightmare::Config::MAX_ITERATIONS,
       @subagent_max_iterations : Int32 = Nightmare::Config::SUBAGENT_MAX_ITERATIONS,
       @subagent_exit_interview : Bool = Nightmare::Config::SUBAGENT_EXIT_INTERVIEW,
@@ -79,7 +93,9 @@ module Nightmare
       @file_card_threshold_screens : Float64 = Nightmare::Config::FILE_CARD_THRESHOLD_SCREENS,
       @file_card_preview_lines : Int32 = Nightmare::Config::FILE_CARD_PREVIEW_LINES,
       @max_dashboard_width : Int32 = Nightmare::Config::MAX_DASHBOARD_WIDTH,
-      @theme : String = Nightmare::Config::DEFAULT_THEME
+      @theme : String = Nightmare::Config::DEFAULT_THEME,
+      @readable_directories : Array(String) = [] of String,
+      @writable_directories : Array(String) = [] of String
     )
     end
 
@@ -123,6 +139,9 @@ module Nightmare
       begin
         raw_content = File.read(file_path)
         current_data = JSON.parse(raw_content).as_h
+        if (w = current_data["writeable_directories"]?) && !current_data.has_key?("writable_directories")
+          current_data["writable_directories"] = w
+        end
       rescue
         return give_up_patching_config(file_path)
       end

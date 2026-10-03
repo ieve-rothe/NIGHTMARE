@@ -31,7 +31,7 @@ require "./nightmare/harness/subagent_runner"
 require "./nightmare/repl"
 
 module Nightmare
-  VERSION = "0.4.0"
+  VERSION = "0.5.0"
 
   module CLI
     struct Options
@@ -40,6 +40,8 @@ module Nightmare
       property model : String? = nil
       property markdown : Bool? = nil
       property target_dir : String = ""
+      property readable_directories : Array(String) = [] of String
+      property writable_directories : Array(String) = [] of String
       property show_help : Bool = false
       property show_version : Bool = false
       property error_message : String? = nil
@@ -54,6 +56,18 @@ module Nightmare
 
           opts.on("-s PATH", "--system=PATH", "Path to custom system prompt file (overrides all defaults)") do |path|
             options.system_prompt_path = path
+          end
+
+          opts.on("-R PATH", "--read-dir=PATH", "Designate an external directory as globally readable (can be repeated)") do |path|
+            options.readable_directories << path
+          end
+
+          opts.on("-W PATH", "--write-dir=PATH", "Designate an external directory as globally writable (can be repeated)") do |path|
+            options.writable_directories << path
+          end
+
+          opts.on("--writable-dir=PATH", "--writeable-dir=PATH", "Designate an external directory as globally writable (can be repeated)") do |path|
+            options.writable_directories << path
           end
 
           opts.on("--no-logs", "--no-log", "Disable LLM interaction logging and run in zero-footprint ghost mode") do
@@ -101,6 +115,8 @@ module Nightmare
           opts = OptionParser.new do |p|
             p.banner = "NIGHTMARE - Developer REPL\nUsage: nightmare [options] [workspace_path]"
             p.on("-s PATH", "--system=PATH", "Path to custom system prompt file") { }
+            p.on("-R PATH", "--read-dir=PATH", "Designate an external directory as readable") { }
+            p.on("-W PATH", "--write-dir=PATH", "Designate an external directory as writable") { }
             p.on("--no-logs", "--no-log", "Disable logging and run in zero-footprint ghost mode") { }
             p.on("-m MODEL", "--model=MODEL", "Select model provider or alias") { }
             p.on("--markdown", "Enable ANSI markdown formatting in terminal") { }
@@ -150,7 +166,9 @@ module Nightmare
         env = Workspace::Environment.resolve(
           target,
           ensure_dirs: !options.no_log,
-          no_log: options.no_log
+          no_log: options.no_log,
+          cli_readable_directories: options.readable_directories,
+          cli_writable_directories: options.writable_directories
         )
         repl = REPL.new(
           env: env,

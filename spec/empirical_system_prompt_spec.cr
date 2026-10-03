@@ -385,7 +385,7 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
         banner = env.startup_banner
 
         lines = banner.lines
-        lines.size.should eq(5)
+        lines.size.should be >= 5
 
         # In standard path scenarios, content_width is 72, total box width is 76
         widths = lines.map(&.size)
@@ -412,10 +412,10 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
         lines[3].ends_with?(" │").should be_true
         lines[3].should contain("/")
 
-        # Line 5: Bottom border
-        lines[4].starts_with?("└").should be_true
-        lines[4].ends_with?("┘").should be_true
-        lines[4].chars.all? { |c| c == '└' || c == '─' || c == '┘' }.should be_true
+        # Bottom border
+        lines.last.starts_with?("└").should be_true
+        lines.last.ends_with?("┘").should be_true
+        lines.last.chars.all? { |c| c == '└' || c == '─' || c == '┘' }.should be_true
       end
     end
 
@@ -424,7 +424,7 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
       banner = env.startup_banner
 
       lines = banner.lines
-      lines.size.should eq(5)
+      lines.size.should be >= 5
 
       widths = lines.map(&.size)
       widths.uniq.size.should eq(1)
@@ -434,7 +434,7 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
       lines[1].should eq("│ Workspace : /home/cam/repos/adjutant/nightmare                           │")
       lines[2].should eq("│ Config    : ~/.config/nightmare/workspaces/nightmare-b97495a0/           │")
       lines[3].should eq("│ State/Logs: ~/.local/state/nightmare/workspaces/nightmare-b97495a0/      │")
-      lines[4].should eq("└──────────────────────────────────────────────────────────────────────────┘")
+      lines.last.should eq("└──────────────────────────────────────────────────────────────────────────┘")
     end
 
     it "preserves uniform box integrity and alignment when workspace path is long" do
@@ -448,7 +448,7 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
         banner = env.startup_banner
 
         lines = banner.lines
-        lines.size.should eq(5)
+        lines.size.should be >= 5
 
         # All lines must expand uniformly
         widths = lines.map(&.size)
@@ -463,8 +463,8 @@ describe "Empirical System Prompt Challenge (F1.6, F1.8, F1.7)" do
         lines[2].ends_with?(" │").should be_true
         lines[3].starts_with?("│ State/Logs: ").should be_true
         lines[3].ends_with?(" │").should be_true
-        lines[4].starts_with?("└").should be_true
-        lines[4].ends_with?("┘").should be_true
+        lines.last.starts_with?("└").should be_true
+        lines.last.ends_with?("┘").should be_true
       end
     end
 

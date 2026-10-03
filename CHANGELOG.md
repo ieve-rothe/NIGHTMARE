@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-03
+
+### Added
+- **Globally Readable External Directories (TKT-027)**: New `readable_dirs` config option (CLI `--readable-dir`, env `NIGHTMARE_READABLE_DIRS`) lets agents read files outside the workspace root. Paths are resolved relative to the workspace and validated against the workspace boundary.
+- **Globally Writable External Directories (TKT-028)**: New `writable_dirs` config option (CLI `--writable-dir`, env `NIGHTMARE_WRITABLE_DIRS`) lets agents write to specific external directories. Write-path resolution and guard enforcement ensure only explicitly allowed directories are mutable.
+- **Adaptive Directory Listing Depth & Result Budget Limiting (TKT-029)**: `list_files` dynamically collapses deep directory trees to depth 1 with item count indicators when total file count exceeds budget (`list_files_max_results`, default 40), preventing context overflow on local models while preserving full multi-level listings for small directories. Added optional `depth` parameter.
+
 ## [0.4.0] - 2026-09-27
 
 ### Added

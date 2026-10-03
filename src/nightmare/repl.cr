@@ -63,6 +63,9 @@ module Nightmare
 
       # 1. System prompt resolution
       prompt = SystemPrompt::Resolver.resolve(@env, system_prompt_path)
+      unless @env.readable_directories.empty?
+        prompt = "#{prompt}\n\nAllowed external readable directories (read-only):\n#{@env.readable_directories.map { |d| "- #{d}" }.join("\n")}"
+      end
       @model_name = @env.resolve_model(model_override)
 
       # 2. Persisted calibrator
@@ -92,7 +95,8 @@ module Nightmare
         temperature: @env.settings.temperature,
         top_p: @env.settings.top_p,
         max_tokens: @env.settings.max_tokens,
-        api_url: api_url
+        api_url: api_url,
+        keep_alive: @env.settings.keep_alive
       )
       raw_client = Mantle::Clients::OllamaClient.new(model_config)
       client : Mantle::Clients::Client = if @no_log

@@ -86,27 +86,30 @@ module Nightmare::Tools
 
     private def build_list_files_tool : Mantle::Tools::Tool
       props = {
-        "path" => Mantle::Tools::PropertyDefinition.new("string", "Directory path relative to workspace root (defaults to .)"),
-        "glob" => Mantle::Tools::PropertyDefinition.new("string", "Glob pattern to filter filenames (e.g. **/*.cr)"),
+        "path"  => Mantle::Tools::PropertyDefinition.new("string", "Directory path relative to workspace root (defaults to .) or an allowed readable directory path"),
+        "glob"  => Mantle::Tools::PropertyDefinition.new("string", "Glob pattern to filter filenames (e.g. **/*.cr)"),
+        "depth" => Mantle::Tools::PropertyDefinition.new("integer", "Optional maximum directory traversal depth. When omitted, adaptive depth collapsing applies if total files exceed the threshold."),
       }
       schema = Mantle::Tools::ParametersSchema.new(props)
-      func = Mantle::Tools::FunctionDefinition.new("list_files", "Lists files in workspace with glob filtering, excluding git and sensitive files.", schema)
+      func = Mantle::Tools::FunctionDefinition.new("list_files", "Lists files in workspace or allowed readable directory with glob filtering, excluding git and sensitive files.", schema)
 
       Mantle::Tools::Tool.new(func) do |args|
         path = args["path"]?.try(&.as_s?) || args["directory"]?.try(&.as_s?)
         glob = args["glob"]?.try(&.as_s?)
-        @read_only.list_files(path, glob)
+        raw_depth = args["depth"]?
+        depth = raw_depth.try(&.as_i?) || raw_depth.try(&.as_s?.try(&.to_i?))
+        @read_only.list_files(path, glob, depth)
       end
     end
 
     private def build_search_tool : Mantle::Tools::Tool
       props = {
         "pattern" => Mantle::Tools::PropertyDefinition.new("string", "Regex pattern to search for in files"),
-        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Directory path relative to workspace root"),
+        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Directory path relative to workspace root or an allowed readable directory path"),
         "glob"    => Mantle::Tools::PropertyDefinition.new("string", "Glob pattern to restrict search files"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["pattern"])
-      func = Mantle::Tools::FunctionDefinition.new("search", "Searches file contents across workspace for a regex pattern.", schema)
+      func = Mantle::Tools::FunctionDefinition.new("search", "Searches file contents across workspace or allowed readable directory for a regex pattern.", schema)
 
       Mantle::Tools::Tool.new(func) do |args|
         pattern = args["pattern"]?.try(&.as_s?) || args["query"]?.try(&.as_s?) || ""
@@ -118,7 +121,7 @@ module Nightmare::Tools
 
     private def build_read_file_tool : Mantle::Tools::Tool
       props = {
-        "path"   => Mantle::Tools::PropertyDefinition.new("string", "Path to file to read"),
+        "path"   => Mantle::Tools::PropertyDefinition.new("string", "Path to file to read (within workspace or an allowed readable directory)"),
         "offset" => Mantle::Tools::PropertyDefinition.new("integer", "1-based line number to begin reading from"),
         "limit"  => Mantle::Tools::PropertyDefinition.new("integer", "Maximum number of lines to read"),
       }
@@ -141,7 +144,7 @@ module Nightmare::Tools
 
     private def build_file_info_tool : Mantle::Tools::Tool
       props = {
-        "path" => Mantle::Tools::PropertyDefinition.new("string", "Path to file or directory"),
+        "path" => Mantle::Tools::PropertyDefinition.new("string", "Path to file or directory (within workspace or an allowed readable directory)"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["path"])
       func = Mantle::Tools::FunctionDefinition.new("file_info", "Returns metadata for a file or directory in the workspace.", schema)
@@ -154,7 +157,7 @@ module Nightmare::Tools
 
     private def build_write_file_tool : Mantle::Tools::Tool
       props = {
-        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Path to write to"),
+        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Path to write to (within workspace or an allowed writable directory)"),
         "content" => Mantle::Tools::PropertyDefinition.new("string", "Content to write to file"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["path", "content"])
@@ -169,7 +172,7 @@ module Nightmare::Tools
 
     private def build_replace_in_file_tool : Mantle::Tools::Tool
       props = {
-        "path"        => Mantle::Tools::PropertyDefinition.new("string", "Path to file to edit"),
+        "path"        => Mantle::Tools::PropertyDefinition.new("string", "Path to file to edit (within workspace or an allowed writable directory)"),
         "target"      => Mantle::Tools::PropertyDefinition.new("string", "Exact unique substring to replace. When provided with start_line, validates content and derives end_line if end_line is omitted."),
         "replacement" => Mantle::Tools::PropertyDefinition.new("string", "Replacement content"),
         "start_line"  => Mantle::Tools::PropertyDefinition.new("integer", "Optional 1-based start line number for line-anchored replacement"),
@@ -196,7 +199,7 @@ module Nightmare::Tools
 
     private def build_append_to_file_tool : Mantle::Tools::Tool
       props = {
-        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Path to file"),
+        "path"    => Mantle::Tools::PropertyDefinition.new("string", "Path to file (within workspace or an allowed writable directory)"),
         "content" => Mantle::Tools::PropertyDefinition.new("string", "Content to append"),
       }
       schema = Mantle::Tools::ParametersSchema.new(props, ["path", "content"])

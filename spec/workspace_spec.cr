@@ -199,6 +199,107 @@ describe Nightmare::Workspace do
           env.git_path?("git_util.cr").should be_false
         end
       end
+
+      it "allows reading from configured readable_directories via sanitize_read_path while denying sanitize_path" do
+        with_temp_dir do |root|
+          with_temp_dir do |ext_dir|
+            File.write(File.join(ext_dir, "skill.md"), "# Shared Skill")
+            Dir.mkdir_p(File.join(ext_dir, "nested"))
+            File.write(File.join(ext_dir, "nested", "doc.md"), "# Nested Doc")
+
+            env = Nightmare::Workspace::Environment.new(
+              root,
+              ensure_dirs: false,
+              cli_readable_directories: [ext_dir]
+            )
+
+            # sanitize_read_path permits files in ext_dir
+            env.sanitize_read_path(File.join(ext_dir, "skill.md")).should eq(File.join(ext_dir, "skill.md"))
+            env.sanitize_read_path(File.join(ext_dir, "nested", "doc.md")).should eq(File.join(ext_dir, "nested", "doc.md"))
+            env.inside_readable?(File.join(ext_dir, "skill.md")).should be_true
+
+            # sanitize_path (used for writes) strictly rejects ext_dir
+            expect_raises(Nightmare::SecurityError, /Path traversal violation/) do
+              env.sanitize_path(File.join(ext_dir, "skill.md"))
+            end
+            env.inside_root?(File.join(ext_dir, "skill.md")).should be_false
+          end
+        end
+      end
+
+      it "allows writing to configured writable_directories via sanitize_write_path and auto-includes them in readable_directories" do
+        with_temp_dir do |root|
+          with_temp_dir do |ext_dir|
+            file_path = File.join(ext_dir, "output.txt")
+            File.write(file_path, "initial content")
+
+            env = Nightmare::Workspace::Environment.new(
+              root,
+              ensure_dirs: false,
+              cli_writable_directories: [ext_dir]
+            )
+
+            # writable_directories auto-included in readable_directories
+            env.writable_directories.should contain(ext_dir)
+            env.readable_directories.should contain(ext_dir)
+
+            # sanitize_write_path and sanitize_read_path allow it
+            env.sanitize_write_path(file_path).should eq(file_path)
+            env.sanitize_read_path(file_path).should eq(file_path)
+            env.inside_writable?(file_path).should be_true
+            env.inside_readable?(file_path).should be_true
+
+            # sanitize_path (strict workspace root) rejects it
+            expect_raises(Nightmare::SecurityError, /Path traversal violation/) do
+              env.sanitize_path(file_path)
+            end
+            env.inside_root?(file_path).should be_false
+          end
+        end
+      end
+
+      it "resolves readable_directories from environment variable NIGHTMARE_READABLE_DIRS" do
+        with_temp_dir do |root|
+          with_temp_dir do |dir1|
+            with_temp_dir do |dir2|
+              ENV["NIGHTMARE_READABLE_DIRS"] = "#{dir1}:#{dir2}"
+              begin
+                env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+                env.readable_directories.should contain(dir1)
+                env.readable_directories.should contain(dir2)
+              ensure
+                ENV.delete("NIGHTMARE_READABLE_DIRS")
+              end
+            end
+          end
+        end
+      end
+
+      it "resolves writable_directories from environment variables NIGHTMARE_WRITABLE_DIRS and NIGHTMARE_WRITEABLE_DIRS" do
+        with_temp_dir do |root|
+          with_temp_dir do |dir1|
+            with_temp_dir do |dir2|
+              ENV["NIGHTMARE_WRITABLE_DIRS"] = dir1
+              begin
+                env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+                env.writable_directories.should contain(dir1)
+                env.readable_directories.should contain(dir1)
+              ensure
+                ENV.delete("NIGHTMARE_WRITABLE_DIRS")
+              end
+
+              ENV["NIGHTMARE_WRITEABLE_DIRS"] = dir2
+              begin
+                env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+                env.writable_directories.should contain(dir2)
+                env.readable_directories.should contain(dir2)
+              ensure
+                ENV.delete("NIGHTMARE_WRITEABLE_DIRS")
+              end
+            end
+          end
+        end
+      end
     end
 
     describe "Startup Notification Banner" do
@@ -214,7 +315,7 @@ describe Nightmare::Workspace do
           banner.should contain("└─")
 
           lines = banner.lines
-          lines.size.should eq(5)
+          lines.size.should be >= 5
           lines.map(&.size).uniq.size.should eq(1)
           lines.first.size.should be >= 76
         end
@@ -236,6 +337,37 @@ describe Nightmare::Workspace do
           lines.size.should eq(4)
           lines.map(&.size).uniq.size.should eq(1)
           lines.first.size.should be >= 76
+        end
+      end
+
+      it "renders banner showing Read Dirs when readable_directories is configured" do
+        with_temp_dir do |dir|
+          with_temp_dir do |read_dir|
+            env = Nightmare::Workspace::Environment.new(
+              dir,
+              ensure_dirs: false,
+              cli_readable_directories: [read_dir]
+            )
+            banner = env.startup_banner
+            banner.should contain("Read Dirs :")
+            banner.should contain(read_dir)
+          end
+        end
+      end
+
+      it "renders banner showing Write Dirs and Read Dirs when writable_directories is configured" do
+        with_temp_dir do |dir|
+          with_temp_dir do |write_dir|
+            env = Nightmare::Workspace::Environment.new(
+              dir,
+              ensure_dirs: false,
+              cli_writable_directories: [write_dir]
+            )
+            banner = env.startup_banner
+            banner.should contain("Read Dirs :")
+            banner.should contain("Write Dirs:")
+            banner.should contain(write_dir)
+          end
         end
       end
     end

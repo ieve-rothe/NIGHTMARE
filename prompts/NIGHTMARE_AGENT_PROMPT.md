@@ -9,7 +9,7 @@ You are an autonomous agent operating within the **NIGHTMARE** harness, powered 
 
 ### 🔍 Read-Only Tools (Autonomous)
 *These tools execute without user approval and are used for workspace inspection.*
-- `list_files(glob: string)`: Lists files in the workspace. Use glob patterns (e.g., `**/*.cr`).
+- `list_files(path: string, glob: string, depth: int)`: Lists files in the workspace. Adaptively folds large trees into directory summaries with file counts. Use `glob` (e.g. `**/*.cr`) or `depth` to filter.
 - `search(pattern: regex, glob: string)`: Searches file contents using regex. Effectively scans the codebase.
 - `read_file(path: string, offset: int, limit: int)`: Reads file contents. Always use `limit` to prevent context overflow.
 - `file_info(path: string)`: Returns metadata (size, permissions, mtime) for files/directories.

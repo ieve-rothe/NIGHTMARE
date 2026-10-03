@@ -3,6 +3,7 @@
 # Licensed under the AGPL-3.0. See LICENSE for details.
 
 require "path"
+require "mantle"
 require "../exceptions"
 require "../config"
 require "../workspace/environment"
@@ -10,21 +11,26 @@ require "../workspace/environment"
 module Nightmare::Tools
   class Guard
     getter env : Workspace::Environment
-    property files_targeted : Array(String)? = nil
+    getter files_targeted : Array(String)? = nil
+
+    def files_targeted=(val : Array(String)?)
+      @files_targeted = val
+      @sandbox.files_targeted = val
+    end
+
+    getter sandbox : Mantle::Tools::FileSystemSandbox
 
     # Sensitive read glob patterns per ARCHITECTURE §4.1
-    SENSITIVE_READ_PATTERNS = [
-      ".env*",
-      "*.pem",
-      "id_rsa*",
-      "*secret*",
-      "*credential*",
-      ".git",
-      ".git/*",
-      ".git/**"
-    ]
+    SENSITIVE_READ_PATTERNS = Mantle::Tools::FileSystemSandbox::DEFAULT_SENSITIVE_PATTERNS
 
     def initialize(@env : Workspace::Environment, @files_targeted : Array(String)? = nil)
+      allowed = [@env.root] + @env.readable_directories
+      @sandbox = Mantle::Tools::FileSystemSandbox.new(
+        working_directory: @env.root,
+        allowed_paths: allowed,
+        files_targeted: @files_targeted,
+        sensitive_patterns: SENSITIVE_READ_PATTERNS.dup
+      )
     end
 
     def root : String
@@ -32,13 +38,25 @@ module Nightmare::Tools
     end
 
     # Resolves a path for reading.
-    # Enforces containment within @root and guards against sensitive patterns.
+    # Enforces containment within @root or configured readable_directories and guards against sensitive patterns.
     # Raises SecurityError on traversal or sensitive file access.
     def resolve_read(path : String) : String
-      full = @env.sanitize_path(path)
-      rel = Path.new(full).relative_to(@env.root).to_s
+      full = @env.sanitize_read_path(path)
+      rel = if @env.inside_root?(full)
+        Path.new(full).relative_to(@env.root).to_s
+      else
+        matching_dir = @env.readable_directories.find do |d|
+          d_prefix = d.ends_with?('/') ? d : "#{d}/"
+          full == d || full.starts_with?(d_prefix)
+        end
+        if matching_dir
+          Path.new(full).relative_to(matching_dir).to_s
+        else
+          full
+        end
+      end
 
-      if sensitive_read?(rel)
+      if sensitive_read?(rel) || sensitive_read?(File.basename(full)) || protected_path?(rel)
         raise SecurityError.new("Access denied: reading sensitive file or pattern is prohibited: #{path}")
       end
 
@@ -47,35 +65,37 @@ module Nightmare::Tools
 
     # Checks if a relative path matches sensitive read patterns.
     def sensitive_read?(rel_path : String) : Bool
-      clean_rel = normalize_rel(rel_path)
-      basename = File.basename(clean_rel)
-
-      SENSITIVE_READ_PATTERNS.any? do |pattern|
-        File.match?(pattern, clean_rel) || File.match?(pattern, basename)
-      end
+      @sandbox.sensitive_path?(rel_path)
     end
 
     # Resolves a path for writing / mutation.
-    # Enforces containment within @root, checks files_targeted if configured,
+    # Enforces containment within @root or configured writable_directories, checks files_targeted if configured,
     # and unconditionally blocks protected paths.
     # Raises SecurityError on traversal or target mismatch.
     def resolve_write(path : String) : String
-      full = @env.sanitize_path(path)
-      rel = Path.new(full).relative_to(@env.root).to_s
+      full = @env.sanitize_write_path(path)
+      rel = if @env.inside_root?(full)
+        Path.new(full).relative_to(@env.root).to_s
+      else
+        matching_dir = @env.writable_directories.find do |d|
+          d_prefix = d.ends_with?('/') ? d : "#{d}/"
+          full == d || full.starts_with?(d_prefix)
+        end
+        if matching_dir
+          Path.new(full).relative_to(matching_dir).to_s
+        else
+          full
+        end
+      end
 
-      if protected_path?(rel)
+      if protected_path?(rel) || protected_path?(File.basename(full))
         raise SecurityError.new("[Refused: #{path} is a protected path]")
       end
 
       if targets = @files_targeted
-        unless targets.empty?
+        unless targets.empty? || @sandbox.path_matches_targeted?(full)
           clean_rel = normalize_rel(rel)
-          allowed = targets.any? do |glob|
-            File.match?(glob, clean_rel) || File.match?(glob, File.basename(clean_rel))
-          end
-          unless allowed
-            raise SecurityError.new("Policy error: Path '#{clean_rel}' is not within allowed files_targeted: #{targets.join(", ")}. Propose adding it to proposed_targets if required.")
-          end
+          raise SecurityError.new("Policy error: Path '#{clean_rel}' is not within allowed files_targeted: #{targets.join(", ")}. Propose adding it to proposed_targets if required.")
         end
       end
 
@@ -85,14 +105,7 @@ module Nightmare::Tools
     # Checks if a relative path is in the protected path list:
     # .git, .git/**, .nightmare/**, .nightmare* (any sibling)
     def protected_path?(rel_path : String) : Bool
-      clean_rel = normalize_rel(rel_path)
-      return true if clean_rel == ".git" || clean_rel.starts_with?(".git/")
-      return true if clean_rel == ".nightmare" || clean_rel.starts_with?(".nightmare/")
-      return true if clean_rel.starts_with?(".nightmare")
-
-      # Also check each path segment in nested paths (e.g. sub/.git or sub/.nightmare)
-      parts = clean_rel.split('/')
-      parts.any? { |p| p == ".git" || p.starts_with?(".nightmare") }
+      @sandbox.protected_path?(rel_path)
     end
 
     private def normalize_rel(rel_path : String) : String

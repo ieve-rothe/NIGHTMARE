@@ -60,6 +60,76 @@ describe Nightmare::Tools::Guard do
         end
       end
     end
+
+    it "allows resolve_read within configured readable_directories" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          File.write(File.join(ext_dir, "skill.md"), "# Skill")
+          Dir.mkdir_p(File.join(ext_dir, "sub"))
+          File.write(File.join(ext_dir, "sub", "ref.md"), "# Reference")
+
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_readable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+
+          guard.resolve_read(File.join(ext_dir, "skill.md")).should eq(File.join(ext_dir, "skill.md"))
+          guard.resolve_read(File.join(ext_dir, "sub", "ref.md")).should eq(File.join(ext_dir, "sub", "ref.md"))
+        end
+      end
+    end
+
+    it "strictly blocks resolve_write to external readable_directories" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          File.write(File.join(ext_dir, "skill.md"), "# Skill")
+
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_readable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+
+          expect_raises(SecurityError, /Path traversal violation/) do
+            guard.resolve_write(File.join(ext_dir, "skill.md"))
+          end
+          expect_raises(SecurityError, /Path traversal violation/) do
+            guard.resolve_write(File.join(ext_dir, "new_file.md"))
+          end
+        end
+      end
+    end
+
+    it "blocks reading sensitive files inside external readable_directories" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          File.write(File.join(ext_dir, ".env"), "SECRET=1")
+          File.write(File.join(ext_dir, "id_rsa"), "private key")
+          Dir.mkdir_p(File.join(ext_dir, ".git"))
+          File.write(File.join(ext_dir, ".git", "config"), "git")
+
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_readable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+
+          expect_raises(SecurityError, /sensitive file/) do
+            guard.resolve_read(File.join(ext_dir, ".env"))
+          end
+          expect_raises(SecurityError, /sensitive file/) do
+            guard.resolve_read(File.join(ext_dir, "id_rsa"))
+          end
+          expect_raises(SecurityError, /sensitive file/) do
+            guard.resolve_read(File.join(ext_dir, ".git", "config"))
+          end
+        end
+      end
+    end
   end
 
   describe "protected paths are unwritable (T7)" do
@@ -73,6 +143,31 @@ describe Nightmare::Tools::Guard do
         expect_raises(SecurityError, /is a protected path/) { guard.resolve_write(".nightmare/prompt.md") }
         expect_raises(SecurityError, /is a protected path/) { guard.resolve_write(".nightmare_backup") }
         expect_raises(SecurityError, /is a protected path/) { guard.resolve_write("sub/.git/HEAD") }
+      end
+    end
+
+    it "allows writes within configured writable_directories while blocking protected paths inside them" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_writable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+
+          target = File.join(ext_dir, "output.txt")
+          guard.resolve_write(target).should eq(target)
+          guard.resolve_read(target).should eq(target)
+
+          # Protected paths within external writable dir are still refused
+          expect_raises(SecurityError, /is a protected path/) do
+            guard.resolve_write(File.join(ext_dir, ".git", "config"))
+          end
+          expect_raises(SecurityError, /is a protected path/) do
+            guard.resolve_write(File.join(ext_dir, ".nightmare", "test"))
+          end
+        end
       end
     end
   end

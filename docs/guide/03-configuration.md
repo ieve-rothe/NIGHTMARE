@@ -91,12 +91,39 @@ Available themes: `cupertino`, `apple`, `cyberpunk`, `outrun`, `phosphor`, `clas
 | 3 | Config File | `settings.markdown` boolean |
 | 4 | Default | `true` |
 
+### Globally Readable Directories
+
+You can designate external directories (and all their child directories) as readable across workspaces:
+
+| Source | Example |
+|---|---|
+| CLI Flag | `-R /path/to/skills` or `--read-dir=/path/to/docs` (can be repeated) |
+| Environment Variable | `NIGHTMARE_READABLE_DIRS="/home/user/skills:/home/user/docs"` |
+| Global Config | `~/.config/nightmare/config.json`: `"readable_directories": ["~/skills"]` |
+| Workspace / Repo Config | Scoped `config.json` / `settings.json`: `"readable_directories": [...]` |
+
+Directories configured as readable allow tools (`read_file`, `list_files`, `search`, `file_info`) and context pinning (`/add`) to inspect external files.
+
+### Globally Writable Directories
+
+You can designate external directories (and all their child directories) as writable across workspaces:
+
+| Source | Example |
+|---|---|
+| CLI Flag | `-W /path/to/output` or `--write-dir=/path/to/output` (can be repeated) |
+| Environment Variable | `NIGHTMARE_WRITABLE_DIRS="/home/user/output:/tmp/work"` (or `NIGHTMARE_WRITEABLE_DIRS`) |
+| Global Config | `~/.config/nightmare/config.json`: `"writable_directories": ["~/output"]` |
+| Workspace / Repo Config | Scoped `config.json` / `settings.json`: `"writable_directories": [...]` |
+
+Directories configured as writable allow mutation tools (`write_file`, `replace_in_file`, `append_to_file`) to modify external files with standard diff approval protections. All writable directories are automatically treated as readable. Protected paths (`.git`, `.nightmare`) remain strictly refused even within external writable directories.
+
 ## Example Configuration
 
 ```json
 {
   "model": "qwen2.5-coder:7b",
   "api_url": "http://127.0.0.1:11434/api/chat",
+  "keep_alive": "15m",
   "markdown": true,
   "logging": true,
   "temperature": 0.2,
@@ -114,6 +141,7 @@ Available themes: `cupertino`, `apple`, `cyberpunk`, `outrun`, `phosphor`, `clas
 |---|---|---|---|
 | `model` | String | `qwen2.5-coder:7b` | The LLM model identifier. |
 | `api_url` | String | `http://127.0.0.1:11434/api/chat` | Endpoint for the Ollama-compatible API. |
+| `keep_alive` | String | `15m` | Ollama model unload duration after inactivity. |
 | `markdown` | Bool | `true` | Toggles rich text formatting in the UI. |
 | `logging` | Bool | `true` | Toggles writing audit logs to `llm_calls.jsonl`. |
 | `temperature` | Float | `0.2` | Randomness in model generation. |

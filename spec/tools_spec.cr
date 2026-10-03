@@ -76,6 +76,135 @@ describe "Nightmare Tools Suite & Security Boundaries" do
       end
     end
 
+    it "recursively lists all files when total count is within max_results" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 10
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        Dir.mkdir_p(File.join(root, "src", "nested"))
+        File.write(File.join(root, "src", "a.cr"), "a")
+        File.write(File.join(root, "src", "nested", "b.cr"), "b")
+        File.write(File.join(root, "README.md"), "# Readme")
+
+        output = tools.list_files
+        output.should contain("README.md")
+        output.should contain("src/a.cr")
+        output.should contain("src/nested/b.cr")
+        output.should_not contain("src/ (")
+        output.should_not contain("[Directory contains")
+      end
+    end
+
+    it "collapses to depth 1 directory summaries when total files exceed max_results" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 3
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        Dir.mkdir_p(File.join(root, "src"))
+        File.write(File.join(root, "README.md"), "# Readme")
+        4.times do |i|
+          File.write(File.join(root, "src", "file_#{i}.cr"), "puts #{i}")
+        end
+
+        output = tools.list_files
+        output.should contain("README.md")
+        output.should contain("src/ (4 files)")
+        output.should contain("[Directory contains >3 files. Showing top-level structure.")
+        output.should_not contain("src/file_0.cr")
+      end
+    end
+
+    it "truncates depth 1 entries when depth 1 items exceed max_results" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 2
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "a.txt"), "a")
+        File.write(File.join(root, "b.txt"), "b")
+        File.write(File.join(root, "c.txt"), "c")
+
+        output = tools.list_files
+        output.should contain("a.txt")
+        output.should contain("b.txt")
+        output.should_not contain("c.txt")
+        output.should contain("[... 1 more entries truncated. Call list_files with 'path' set to a subdirectory or specify a narrower 'glob'.]")
+      end
+    end
+
+    it "respects explicit depth parameter" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 50
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        Dir.mkdir_p(File.join(root, "src", "models"))
+        File.write(File.join(root, "README.md"), "# Readme")
+        File.write(File.join(root, "src", "main.cr"), "main")
+        File.write(File.join(root, "src", "models", "user.cr"), "user")
+
+        depth_1 = tools.list_files(depth: 1)
+        depth_1.should contain("README.md")
+        depth_1.should contain("src/ (2 files)")
+        depth_1.should_not contain("src/main.cr")
+
+        depth_2 = tools.list_files(depth: 2)
+        depth_2.should contain("README.md")
+        depth_2.should contain("src/main.cr")
+        depth_2.should contain("src/models/ (1 file)")
+        depth_2.should_not contain("src/models/user.cr")
+      end
+    end
+
+    it "truncates explicit glob matches when matching files exceed max_results" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 2
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        File.write(File.join(root, "a.cr"), "a")
+        File.write(File.join(root, "b.cr"), "b")
+        File.write(File.join(root, "c.cr"), "c")
+
+        output = tools.list_files(glob: "*.cr")
+        output.should contain("a.cr")
+        output.should contain("b.cr")
+        output.should_not contain("c.cr")
+        output.should contain("[... 1 more matching files truncated. Narrow 'glob' pattern or specify a more specific 'path'.]")
+      end
+    end
+
+    it "excludes protected and sensitive paths from directory counts in collapsed listings" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        env.settings.list_files_max_results = 2
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        Dir.mkdir_p(File.join(root, "src", ".git"))
+        Dir.mkdir_p(File.join(root, "src", ".nightmare"))
+        File.write(File.join(root, "src", "app.cr"), "app")
+        File.write(File.join(root, "src", "b.cr"), "b")
+        File.write(File.join(root, "src", "c.cr"), "c")
+        File.write(File.join(root, "src", ".env"), "SECRET=1")
+        File.write(File.join(root, "src", ".git", "config"), "git")
+        File.write(File.join(root, "src", ".nightmare", "state.json"), "state")
+
+        output = tools.list_files
+        output.should contain("src/ (3 files)")
+        output.should_not contain(".env")
+        output.should_not contain(".git")
+        output.should_not contain(".nightmare")
+      end
+    end
+
     it "searches file contents with pattern matching" do
       with_temp_dir do |root|
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
@@ -212,6 +341,44 @@ describe "Nightmare Tools Suite & Security Boundaries" do
         slice_result.should contain("1 | long line of content text here")
       end
     end
+
+    it "lists files, searches, reads, and inspects files in external readable directories" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          File.write(File.join(ext_dir, "skill_a.md"), "# Skill Alpha\nImportant guidelines here")
+          Dir.mkdir_p(File.join(ext_dir, "guides"))
+          File.write(File.join(ext_dir, "guides", "deploy.md"), "# Deploy Guide\nStep 1: test")
+
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_readable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+          tools = Nightmare::Tools::ReadOnly.new(guard)
+
+          # 1. list_files on external directory
+          list_out = tools.list_files(path: ext_dir)
+          list_out.should contain("#{ext_dir}/skill_a.md")
+          list_out.should contain("#{ext_dir}/guides/deploy.md")
+
+          # 2. search on external directory
+          search_out = tools.search("Alpha", path: ext_dir)
+          search_out.should contain("#{ext_dir}/skill_a.md:1: # Skill Alpha")
+
+          # 3. read_file on external directory
+          read_out = tools.read_file(File.join(ext_dir, "skill_a.md"), offset: 1, limit: 2)
+          read_out.should contain("1 | # Skill Alpha")
+          read_out.should contain("2 | Important guidelines here")
+
+          # 4. file_info on external directory
+          info_json = JSON.parse(tools.file_info(File.join(ext_dir, "skill_a.md")))
+          info_json["path"].as_s.should eq(File.join(ext_dir, "skill_a.md"))
+          info_json["directory"].as_bool.should be_false
+          info_json["lines"].as_i.should eq(2)
+        end
+      end
+    end
   end
 
   describe "mutation tools and diff approval" do
@@ -275,6 +442,47 @@ describe "Nightmare Tools Suite & Security Boundaries" do
         res = mutation.replace_in_file("code.cr", "old_code", "new_code")
         res.should contain("Successfully replaced")
         File.read(file_path).should eq("def run\n  new_code\nend\n")
+      end
+    end
+
+    it "performs write_file, replace_in_file, and append_to_file in external writable directories" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          env = Nightmare::Workspace::Environment.new(
+            root,
+            ensure_dirs: false,
+            cli_writable_directories: [ext_dir]
+          )
+          guard = Nightmare::Tools::Guard.new(env)
+          effects = [] of String
+          handler = ->(_diff : String, _desc : String) { true }
+          mutation = Nightmare::Tools::Mutation.new(guard, handler)
+          mutation.active_side_effects = effects
+
+          # 1. write_file (new file in external dir)
+          target_file = File.join(ext_dir, "test.txt")
+          res1 = mutation.write_file(target_file, "First line\n")
+          res1.should contain("Successfully wrote")
+          File.read(target_file).should eq("First line\n")
+          effects.should contain(target_file)
+
+          # 2. append_to_file (existing file in external dir)
+          res2 = mutation.append_to_file(target_file, "Second line\n")
+          res2.should contain("Successfully appended")
+          File.read(target_file).should eq("First line\nSecond line\n")
+
+          # 3. replace_in_file (existing file in external dir)
+          res3 = mutation.replace_in_file(target_file, "First line", "Initial line")
+          res3.should contain("Successfully replaced")
+          File.read(target_file).should eq("Initial line\nSecond line\n")
+
+          # 4. write_file to an unconfigured external directory is rejected
+          with_temp_dir do |unauthorized_dir|
+            expect_raises(Nightmare::SecurityError, /Path traversal violation/) do
+              mutation.write_file(File.join(unauthorized_dir, "hack.txt"), "bad")
+            end
+          end
+        end
       end
     end
   end

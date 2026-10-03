@@ -6,15 +6,18 @@ This file tracks the status and priority of all development tickets for the `nig
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| [TKT-022](notes/pm/TKT-022-degenerate-loop-history-salvage-and-session-recovery.md) | Degenerate Loop History Salvage and /recover Session Restoration | Context & Session Resilience | Open | High | 2026-09-25 |
 | [TKT-002](notes/pm/TKT-002-kv-cache-utilization-metrics.md) | KV Cache Capacity and Utilization Metrics (Tokens and Memory) | Observability & Resource Management | Open | Med | 2026-09-11 |
 | [TKT-012](notes/pm/TKT-012-response-markdown-boundary-and-scrollback-delineation.md) | Visual Delineation and Response Boundary for Markdown REPL Output | User Interface & Tooling | Resolved | Med | 2026-09-18 |
 | [TKT-013](notes/pm/TKT-013-slash-command-sidechannel-llm-turn.md) | Slash Command for Sidechannel LLM Turn (Dispatch Recipes) | Tooling & Automation | Open | Med | 2024-05-22 |
-
+| [TKT-027](notes/pm/TKT-027-globally-readable-directories.md) | Globally Readable External Directories for Shared Repositories and Skills | Security & Context Management | Resolved | Med | 2026-10-03 |
+| [TKT-028](notes/pm/TKT-028-globally-writable-directories.md) | Globally Writable External Directories for Multi-Repository and Shared Workspace Mutations | Security & Tool Ergonomics | Resolved | Med | 2026-10-03 |
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-029](notes/pm/closed/TKT-029-adaptive-directory-listing-depth-and-budget-limiting.md) | Adaptive Directory Listing Depth and Result Budget Limiting | Harness Stability & Tool Ergonomics | Closed | High | 2026-10-03 |
+| [TKT-026](notes/pm/closed/TKT-026-print-last-utility-command.md) | Utility Command /print_last to Echo Most Recent User Request | User Interface & Tooling | Closed | Med | 2026-10-02 |
+| [TKT-025](notes/pm/closed/TKT-025-factor-resilience-and-subagent-lifecycle-upstream-to-mantle.md) | Factor Resilience, Anti-Derailment, and Subagent Lifecycle Upstream to Mantle | Architecture & Upstream Refactoring | Closed | High | 2026-09-27 |
 | [TKT-024](notes/pm/closed/TKT-024-subagent-iteration-budgets-and-exit-interview.md) | Subagent Iteration Budgets and Automated Exit Interview / Telemetry Post-Mortem | Harness Stability & Subagents | Closed | High | 2026-09-27 |
 | [TKT-023](notes/pm/closed/TKT-023-unified-diff-context-hunk-windowing.md) | Unified Diff Context Windowing and Hunk Pruning | User Interface & Tooling | Closed | Med | 2026-09-26 |
 | [TKT-022](notes/pm/closed/TKT-022-degenerate-loop-history-salvage-and-session-recovery.md) | Degenerate Loop History Salvage and /recover Session Restoration | Context & Harness Invariant Integrity | Closed | High | 2026-09-25 |

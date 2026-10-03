@@ -114,6 +114,9 @@ module Nightmare::Commands
       when "/thinking"
         handle_thinking
         {true, nil}
+      when "/print_last", "/last"
+        handle_print_last(args)
+        {true, nil}
       when "/model"
         handle_model(args)
         {true, nil}
@@ -172,6 +175,7 @@ Available Slash Commands:
   /review          Inspect assembled prompt, pinned files, and token usage
   /recover [opt]   Inspect and restore context from failure/crash dumps
   /thinking        View model internal chain-of-thought from last turn
+  /print_last      Print the most recent user request (or /last)
   /theme [name]    Switch theme (cupertino, apple, cyberpunk, outrun, phosphor, classic)
   /model [name]    Inspect or change the active LLM model
   /paste           Enter multi-line input paste mode (or """)
@@ -337,6 +341,9 @@ HELP
 
       puts "--- Ephemeral Context ---"
       puts Context::SlidingStore.current_date_note
+      unless @env.readable_directories.empty?
+        puts "Readable Directories: #{@env.readable_directories.join(", ")}"
+      end
       puts
 
       skill_block = @skills_manager.active_skill.try(&.formatted_block)
@@ -672,6 +679,30 @@ HELP
         puts "================================\n"
       else
         puts "No thinking recorded for the last turn."
+      end
+    end
+
+    private def handle_print_last(args : String = "") : Nil
+      turn = @store.active_turn || @store.history.last?
+      prompt = turn.try do |t|
+        content = t.user_message.content || ""
+        if content.starts_with?("[Previous turn was interrupted after modifying:") && (idx = content.index("]\n\n"))
+          content[(idx + 3)..-1]
+        else
+          content
+        end
+      end
+
+      if prompt && !prompt.empty?
+        if args == "raw" || args == "--raw"
+          puts prompt
+        else
+          puts "\n=== Last Request ==="
+          puts prompt
+          puts "====================\n"
+        end
+      else
+        puts "No previous user request found."
       end
     end
 

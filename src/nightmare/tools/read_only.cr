@@ -16,8 +16,8 @@ module Nightmare::Tools
     def initialize(@guard : Guard, @pinned_files : Context::PinnedFiles? = nil)
     end
 
-    # Lists files in the workspace with glob filtering, excluding git/nightmare/sensitive files
-    def list_files(path : String? = nil, glob : String? = nil) : String
+    # Lists files in the workspace with glob filtering and adaptive depth collapsing, excluding git/nightmare/sensitive files
+    def list_files(path : String? = nil, glob : String? = nil, depth : Int32? = nil) : String
       target_dir = if p = path
         @guard.resolve_read(p)
       else
@@ -28,23 +28,99 @@ module Nightmare::Tools
         return {error: "Directory not found: #{path || "."}"}.to_json
       end
 
-      results = [] of String
-      filter_glob = glob || "**/*"
+      max_results = @guard.env.settings.list_files_max_results
+      target_in_root = @guard.env.inside_root?(target_dir)
 
-      Dir.glob(File.join(target_dir, filter_glob), match: :all) do |entry|
-        next if Dir.exists?(entry) # only files
-        rel = Path.new(entry).relative_to(@guard.root).to_s
+      # Mode 1: Explicit glob pattern provided
+      if glob && !glob.empty?
+        results = [] of String
+        Dir.glob(File.join(target_dir, glob), match: :all) do |entry|
+          next if Dir.exists?(entry) # only files
+          rel_to_root = Path.new(entry).relative_to(@guard.root).to_s rescue entry
+          rel_to_target = Path.new(entry).relative_to(target_dir).to_s rescue entry
 
-        # Exclude protected/sensitive files
-        next if @guard.protected_path?(rel)
-        next if @guard.sensitive_read?(rel)
+          # Exclude protected/sensitive files
+          next if @guard.protected_path?(rel_to_root) || @guard.protected_path?(rel_to_target)
+          next if @guard.sensitive_read?(rel_to_root) || @guard.sensitive_read?(rel_to_target) || @guard.sensitive_read?(File.basename(entry))
 
-        results << rel
+          display_path = format_display_path(entry, target_dir, rel_to_root, rel_to_target, path, target_in_root)
+          results << display_path
+        end
+
+        results.sort!
+        if results.empty?
+          output = "(no matching files)"
+        elsif results.size > max_results
+          truncated = results.first(max_results)
+          remaining = results.size - max_results
+          output = (truncated + ["[... #{remaining} more matching files truncated. Narrow 'glob' pattern or specify a more specific 'path'.]"]).join("\n")
+        else
+          output = results.join("\n")
+        end
+
+        return Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
       end
 
-      results.sort!
-      output = results.join("\n")
-      output = "(no matching files)" if output.empty?
+      # Mode 2: Explicit depth requested
+      if requested_depth = depth
+        clamped_depth = Math.max(1, requested_depth)
+        entries = [] of String
+        collect_depth_bounded(target_dir, target_dir, 1, clamped_depth, path, target_in_root, entries)
+        entries.sort!
+
+        if entries.empty?
+          output = "(no matching files)"
+        elsif entries.size > max_results
+          truncated = entries.first(max_results)
+          remaining = entries.size - max_results
+          output = (truncated + ["[... #{remaining} more entries truncated. Call list_files with 'path' set to a subdirectory or specify a narrower 'glob'.]"]).join("\n")
+        else
+          output = entries.join("\n")
+        end
+
+        return Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
+      end
+
+      # Mode 3: Adaptive mode (no glob, no depth)
+      all_recursive_files = [] of String
+      is_over_budget = false
+
+      Dir.glob(File.join(target_dir, "**/*"), match: :all) do |entry|
+        next if Dir.exists?(entry)
+        rel_to_root = Path.new(entry).relative_to(@guard.root).to_s rescue entry
+        rel_to_target = Path.new(entry).relative_to(target_dir).to_s rescue entry
+
+        next if @guard.protected_path?(rel_to_root) || @guard.protected_path?(rel_to_target)
+        next if @guard.sensitive_read?(rel_to_root) || @guard.sensitive_read?(rel_to_target) || @guard.sensitive_read?(File.basename(entry))
+
+        if all_recursive_files.size >= max_results
+          is_over_budget = true
+          break
+        end
+
+        display_path = format_display_path(entry, target_dir, rel_to_root, rel_to_target, path, target_in_root)
+        all_recursive_files << display_path
+      end
+
+      unless is_over_budget
+        all_recursive_files.sort!
+        output = all_recursive_files.empty? ? "(no matching files)" : all_recursive_files.join("\n")
+        return Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
+      end
+
+      # Large directory exceeding budget -> collapse to depth 1
+      entries = [] of String
+      collect_depth_bounded(target_dir, target_dir, 1, 1, path, target_in_root, entries)
+      entries.sort!
+
+      if entries.size > max_results
+        truncated = entries.first(max_results)
+        remaining = entries.size - max_results
+        output = (truncated + ["[... #{remaining} more entries truncated. Call list_files with 'path' set to a subdirectory or specify a narrower 'glob'.]"]).join("\n")
+      else
+        footer = "[Directory contains >#{max_results} files. Showing top-level structure. Call list_files with 'path' set to a subdirectory or specify a 'glob' to inspect deeper.]"
+        output = (entries + [footer]).join("\n")
+      end
 
       Guard.cap_output(output, max_bytes: @guard.env.settings.tool_output_max_bytes)
     end
@@ -69,20 +145,30 @@ module Nightmare::Tools
 
       filter_glob = glob || "**/*"
       matches = [] of String
+      target_in_root = @guard.env.inside_root?(target_dir)
 
       Dir.glob(File.join(target_dir, filter_glob), match: :all) do |entry|
         next if Dir.exists?(entry)
-        rel = Path.new(entry).relative_to(@guard.root).to_s
+        rel_to_root = Path.new(entry).relative_to(@guard.root).to_s
+        rel_to_target = Path.new(entry).relative_to(target_dir).to_s
 
-        next if @guard.protected_path?(rel)
-        next if @guard.sensitive_read?(rel)
+        next if @guard.protected_path?(rel_to_root) || @guard.protected_path?(rel_to_target)
+        next if @guard.sensitive_read?(rel_to_root) || @guard.sensitive_read?(rel_to_target) || @guard.sensitive_read?(File.basename(entry))
+
+        display_path = if target_in_root
+          rel_to_root
+        elsif p = path
+          p.ends_with?('/') ? "#{p}#{rel_to_target}" : "#{p}/#{rel_to_target}"
+        else
+          entry
+        end
 
         begin
           idx = 0
           File.each_line(entry) do |line|
             idx += 1
             if line.matches?(regex)
-              matches << "#{rel}:#{idx}: #{line}"
+              matches << "#{display_path}:#{idx}: #{line}"
               break if matches.size >= 1000
             end
           end
@@ -100,10 +186,14 @@ module Nightmare::Tools
     # Reads file contents with optional 1-based line offset and limit
     def read_file(path : String, offset : Int32? = nil, limit : Int32? = nil) : String
       full_path = @guard.resolve_read(path)
-      rel_path = Path.new(full_path).relative_to(@guard.root).to_s
+      rel_path = if @guard.env.inside_root?(full_path)
+        Path.new(full_path).relative_to(@guard.root).to_s
+      else
+        full_path
+      end
 
-      if @pinned_files.try &.pinned?(rel_path)
-        return "[File is already pinned in context: #{rel_path}]"
+      if @pinned_files.try &.pinned?(rel_path) || @pinned_files.try &.pinned?(path)
+        return "[File is already pinned in context: #{path}]"
       end
 
       unless File.exists?(full_path)
@@ -170,6 +260,88 @@ module Nightmare::Tools
       Guard.cap_output(formatted, max_bytes: settings.tool_output_max_bytes)
     end
 
+    private def format_display_path(
+      entry : String,
+      root_target_dir : String,
+      rel_to_root : String,
+      rel_to_target : String,
+      path_param : String?,
+      target_in_root : Bool,
+      is_dir : Bool = false
+    ) : String
+      base = if target_in_root
+        rel_to_root
+      elsif p = path_param
+        p.ends_with?('/') ? "#{p}#{rel_to_target}" : "#{p}/#{rel_to_target}"
+      else
+        entry
+      end
+
+      if is_dir && !base.ends_with?('/')
+        "#{base}/"
+      else
+        base
+      end
+    end
+
+    private def collect_depth_bounded(
+      dir : String,
+      root_target_dir : String,
+      current_depth : Int32,
+      max_depth : Int32,
+      path_param : String?,
+      target_in_root : Bool,
+      results : Array(String)
+    ) : Nil
+      children = begin
+        Dir.children(dir)
+      rescue
+        return
+      end
+
+      children.sort!
+      children.each do |child|
+        full_child = File.join(dir, child)
+        rel_to_root = Path.new(full_child).relative_to(@guard.root).to_s rescue full_child
+        rel_to_target = Path.new(full_child).relative_to(root_target_dir).to_s rescue child
+
+        next if @guard.protected_path?(rel_to_root) || @guard.protected_path?(child)
+        next if @guard.sensitive_read?(rel_to_root) || @guard.sensitive_read?(child)
+
+        is_directory = File.directory?(full_child) rescue false
+
+        if is_directory
+          if current_depth >= max_depth
+            count = count_files_in_dir(full_child)
+            display_dir = format_display_path(full_child, root_target_dir, rel_to_root, rel_to_target, path_param, target_in_root, is_dir: true)
+            count_label = count == 1 ? "1 file" : "#{count} files"
+            results << "#{display_dir} (#{count_label})"
+          else
+            collect_depth_bounded(full_child, root_target_dir, current_depth + 1, max_depth, path_param, target_in_root, results)
+          end
+        else
+          display_file = format_display_path(full_child, root_target_dir, rel_to_root, rel_to_target, path_param, target_in_root, is_dir: false)
+          results << display_file
+        end
+      end
+    end
+
+    private def count_files_in_dir(dir_path : String) : Int32
+      count = 0
+      begin
+        Dir.glob(File.join(dir_path, "**/*"), match: :all) do |entry|
+          next if Dir.exists?(entry)
+          rel_to_root = Path.new(entry).relative_to(@guard.root).to_s rescue entry
+          next if @guard.protected_path?(rel_to_root) || @guard.protected_path?(File.basename(entry))
+          next if @guard.sensitive_read?(rel_to_root) || @guard.sensitive_read?(File.basename(entry))
+          count += 1
+          break if count >= 10_000
+        end
+      rescue
+      end
+      count
+    end
+
     private def bulk_data_file?(rel_path : String, patterns : Array(String)) : Bool
       clean_rel = rel_path
       basename = File.basename(clean_rel)
@@ -190,8 +362,14 @@ module Nightmare::Tools
       is_dir = info.directory?
       lines_count = is_dir ? 0 : File.read_lines(full_path).size rescue 0
 
+      display_path = if @guard.env.inside_root?(full_path)
+        Path.new(full_path).relative_to(@guard.root).to_s
+      else
+        full_path
+      end
+
       {
-        path: Path.new(full_path).relative_to(@guard.root).to_s,
+        path: display_path,
         size_bytes: info.size,
         directory: is_dir,
         lines: lines_count,

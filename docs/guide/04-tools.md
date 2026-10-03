@@ -7,12 +7,17 @@ NIGHTMARE equips the LLM with 10 tools partitioned into read-only, mutation, she
 Read-only tools execute autonomously without user approval. They allow the agent to inspect the workspace.
 
 ### `list_files`
-Lists files in the workspace with glob filtering. Excludes git and sensitive files.
+Lists files in the workspace with glob filtering and adaptive depth collapsing. Excludes git and sensitive files.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | String | No | Directory path relative to workspace root (defaults to `.`). |
+| `path` | String | No | Directory path relative to workspace root (defaults to `.`) or an allowed readable directory. |
 | `glob` | String | No | Glob pattern to filter filenames (e.g. `**/*.cr`). |
+| `depth` | Integer | No | Optional maximum traversal depth. When omitted, depth dynamically collapses if total files exceed threshold. |
+
+When neither `glob` nor `depth` is specified, `list_files` operates adaptively:
+- **Small directory** ($\le$ `list_files_max_results`, default 40): returns a full recursive multi-level breakdown.
+- **Large directory** ($>$ `list_files_max_results`): dynamically collapses deeper directories into summary nodes (e.g. `src/ (42 files)`) to prevent context overflow.
 
 ```json
 {

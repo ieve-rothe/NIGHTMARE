@@ -512,4 +512,107 @@ describe Nightmare::Commands::Router do
       end
     end
   end
+
+  it "handles /print_last and /last commands" do
+    stdout = IO::Memory.new
+    router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+    # 1. No requests yet
+    stdout.clear
+    handled, _ = router.handle("/print_last")
+    handled.should be_true
+    stdout.to_s.should contain("No previous user request found.")
+
+    # 2. With active turn
+    router.store.start_turn("Can you refactor the database connector?")
+    stdout.clear
+    handled, _ = router.handle("/print_last")
+    handled.should be_true
+    stdout.to_s.should contain("=== Last Request ===")
+    stdout.to_s.should contain("Can you refactor the database connector?")
+    stdout.to_s.should contain("====================")
+
+    # 3. Short alias /last
+    stdout.clear
+    handled, _ = router.handle("/last")
+    handled.should be_true
+    stdout.to_s.should contain("Can you refactor the database connector?")
+
+    # 4. Raw format (/print_last raw)
+    stdout.clear
+    handled, _ = router.handle("/print_last raw")
+    handled.should be_true
+    stdout.to_s.strip.should eq("Can you refactor the database connector?")
+
+    # 5. After committing turn to history
+    turn = router.store.active_turn.not_nil!
+    turn.append_assistant(Mantle::Message.new("assistant", "Refactored successfully."))
+    router.store.commit_turn
+    router.store.active_turn.should be_nil
+    router.store.history.size.should eq(1)
+
+    stdout.clear
+    router.handle("/print_last")
+    stdout.to_s.should contain("Can you refactor the database connector?")
+
+    # 6. Strips previous interruption advisory note if present
+    interrupted_prompt = "[Previous turn was interrupted after modifying: lib/db.cr]\n\nFix the connection leak"
+    turn2 = Mantle::Storage::Turn.new(Mantle::Message.new("user", interrupted_prompt))
+    turn2.append_assistant(Mantle::Message.new("assistant", "Fixed."))
+    router.store.push_turn(turn2)
+
+    stdout.clear
+    router.handle("/print_last raw")
+    stdout.to_s.strip.should eq("Fix the connection leak")
+  end
+
+  it "pins external readable files via /add and inspects via /review" do
+    with_temp_dir do |root|
+      with_temp_dir do |ext_dir|
+        ext_file = File.join(ext_dir, "ext_skill.md")
+        File.write(ext_file, "# External Skill Content")
+
+        env = Nightmare::Workspace::Environment.new(
+          root_path: root,
+          ensure_dirs: false,
+          cli_readable_directories: [ext_dir]
+        )
+        stdout = IO::Memory.new
+        router = Nightmare::Commands::Router.new(
+          store: Nightmare::Context::SlidingStore.new,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(File.join(root, "state"), enabled: false),
+          current_prompt: "Test",
+          current_model: "test-model",
+          stdout: stdout
+        )
+
+        # /add external file
+        stdout.clear
+        handled, _ = router.handle("/add #{ext_file}")
+        handled.should be_true
+        stdout.to_s.should contain("Pinned #{ext_file}")
+        router.pinned_files.files.size.should eq(1)
+
+        # /review shows readable directories and pinned file
+        stdout.clear
+        handled, _ = router.handle("/review")
+        handled.should be_true
+        stdout.to_s.should contain("Readable Directories:")
+        stdout.to_s.should contain(ext_dir)
+        stdout.to_s.should contain("=== PINNED FILE: #{ext_file} ===")
+        stdout.to_s.should contain("# External Skill Content")
+
+        # /drop external file
+        stdout.clear
+        handled, _ = router.handle("/drop #{ext_file}")
+        handled.should be_true
+        stdout.to_s.should contain("Dropped pinned file: #{ext_file}")
+        router.pinned_files.files.size.should eq(0)
+      end
+    end
+  end
 end

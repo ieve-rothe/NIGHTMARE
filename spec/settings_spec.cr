@@ -7,6 +7,7 @@ describe Nightmare::Settings do
     settings = Nightmare::Settings.new
     settings.model.should eq(Nightmare::Config::DEFAULT_MODEL)
     settings.api_url.should eq("http://127.0.0.1:11434/api/chat")
+    settings.keep_alive.should eq("15m")
     settings.markdown.should be_true
     settings.logging.should be_true
     settings.temperature.should eq(0.2)
@@ -15,6 +16,7 @@ describe Nightmare::Settings do
     settings.command_timeout_seconds.should eq(60)
     settings.max_command_timeout_seconds.should eq(600)
     settings.tool_output_max_bytes.should eq(24_576)
+    settings.list_files_max_results.should eq(40)
     settings.per_file_max_tokens.should eq(10_000)
     settings.bulk_data_patterns.should eq(["*.jsonl", "*.log", "*.trace", "*.ndjson"])
     settings.bulk_data_max_lines.should eq(50)
@@ -33,6 +35,8 @@ describe Nightmare::Settings do
     settings.shed_keep_chars.should eq(200)
     settings.shed_keep_verbatim.should eq(2)
     settings.initial_divisor.should eq(3.5)
+    settings.readable_directories.should eq([] of String)
+    settings.writable_directories.should eq([] of String)
   end
 
   it "bootstraps ~/.config/nightmare/config.json when no config exists" do
@@ -51,12 +55,14 @@ describe Nightmare::Settings do
       parsed["markdown"].as_bool.should be_true
       parsed["logging"].as_bool.should be_true
       parsed["api_url"].as_s.should eq("http://127.0.0.1:11434/api/chat")
+      parsed["keep_alive"].as_s.should eq("15m")
       parsed["temperature"].as_f.should eq(0.2)
       parsed["top_p"].as_f.should eq(0.95)
       parsed["max_tokens"].as_i.should eq(4096)
       parsed["command_timeout_seconds"].as_i.should eq(60)
       parsed["max_command_timeout_seconds"].as_i.should eq(600)
       parsed["tool_output_max_bytes"].as_i.should eq(24_576)
+      parsed["list_files_max_results"].as_i.should eq(40)
       parsed["per_file_max_tokens"].as_i.should eq(10_000)
       parsed["bulk_data_patterns"].as_a.map(&.as_s).should eq(["*.jsonl", "*.log", "*.trace", "*.ndjson"])
       parsed["bulk_data_max_lines"].as_i.should eq(50)
@@ -75,6 +81,7 @@ describe Nightmare::Settings do
       parsed["shed_keep_chars"].as_i.should eq(200)
       parsed["shed_keep_verbatim"].as_i.should eq(2)
       parsed["initial_divisor"].as_f.should eq(3.5)
+      parsed["readable_directories"].as_a.should be_empty
     end
   end
 
@@ -119,6 +126,7 @@ describe Nightmare::Settings do
       # File should be updated on disk with full schema
       disk_json = JSON.parse(File.read(cfg_file))
       disk_json["model"].as_s.should eq("custom-ollama:14b")
+      disk_json["keep_alive"].as_s.should eq("15m")
       disk_json["markdown"].as_bool.should be_true
       disk_json["max_tokens"].as_i.should eq(4096)
       disk_json["max_iterations"].as_i.should eq(25)
@@ -161,6 +169,23 @@ describe Nightmare::Settings do
       backup_files = Dir.children(dir).select { |f| f.starts_with?("config.json.old.") }
       backup_files.size.should eq(1)
       File.read(File.join(dir, backup_files.first)).should eq("INVALID_JSON_CONTENT{{{")
+    end
+  end
+
+  it "loads writable_directories and writeable_directories alias from config" do
+    with_temp_dir do |dir|
+      cfg_file = File.join(dir, "config.json")
+      File.write(cfg_file, %({"writable_directories": ["/tmp/write1", "/tmp/write2"]}))
+      settings = Nightmare::Settings.load_and_patch(cfg_file)
+      settings.writable_directories.should eq(["/tmp/write1", "/tmp/write2"])
+      settings.writeable_directories.should eq(["/tmp/write1", "/tmp/write2"])
+    end
+
+    with_temp_dir do |dir|
+      cfg_file = File.join(dir, "config.json")
+      File.write(cfg_file, %({"writeable_directories": ["/tmp/alias1"]}))
+      settings = Nightmare::Settings.load_and_patch(cfg_file)
+      settings.writable_directories.should eq(["/tmp/alias1"])
     end
   end
 end

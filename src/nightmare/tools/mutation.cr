@@ -21,19 +21,19 @@ module Nightmare::Tools
     # Creates a new file or overwrites an existing file with interactive diff approval
     def write_file(path : String, content : String) : String
       full_path = @guard.resolve_write(path)
-      rel_path = Path.new(full_path).relative_to(@guard.root).to_s
+      display_path = format_display_path(full_path)
 
       if File.exists?(full_path)
         # Existing file: requires unified diff and approval modal
         original = File.read(full_path)
-        diff_text = Diff.unified_diff(original, content, rel_path)
+        diff_text = Diff.unified_diff(original, content, display_path)
 
         # If identical, no-op
         if diff_text.empty?
-          return "File #{rel_path} is already up to date (no changes)."
+          return "File #{display_path} is already up to date (no changes)."
         end
 
-        unless approve_mutation?(diff_text, "overwrite #{rel_path}")
+        unless approve_mutation?(diff_text, "overwrite #{display_path}")
           return "[Execution rejected by user]"
         end
       else
@@ -42,9 +42,9 @@ module Nightmare::Tools
       end
 
       File.write(full_path, content)
-      record_side_effect(rel_path)
+      record_side_effect(display_path)
 
-      "Successfully wrote #{content.bytesize} bytes to #{rel_path}"
+      "Successfully wrote #{content.bytesize} bytes to #{display_path}"
     end
 
     # Helper to strip read_file visual gutter prefixes ("   28 | ")
@@ -65,7 +65,7 @@ module Nightmare::Tools
       end_line : Int32? = nil
     ) : String
       full_path = @guard.resolve_write(path)
-      rel_path = Path.new(full_path).relative_to(@guard.root).to_s
+      display_path = format_display_path(full_path)
 
       unless File.exists?(full_path)
         return {error: "File not found: #{path}"}.to_json
@@ -78,7 +78,7 @@ module Nightmare::Tools
         total_lines = lines.size
 
         if total_lines == 0
-          return {error: "File #{rel_path} is empty; use write_file instead"}.to_json
+          return {error: "File #{display_path} is empty; use write_file instead"}.to_json
         end
 
         s_line = start_line || 1
@@ -94,7 +94,7 @@ module Nightmare::Tools
                  end
 
         if s_line < 1 || e_line < s_line || s_line > total_lines || e_line > total_lines
-          return {error: "Invalid line range #{s_line}..#{e_line} for #{rel_path} (file has #{total_lines} lines)"}.to_json
+          return {error: "Invalid line range #{s_line}..#{e_line} for #{display_path} (file has #{total_lines} lines)"}.to_json
         end
 
         clean_replacement = has_display_prefixes?(replacement) ? strip_display_prefixes(replacement) : replacement
@@ -106,7 +106,7 @@ module Nightmare::Tools
           target_normalized = norm_target.ends_with?('\n') ? norm_target : "#{norm_target}\n"
           segment_normalized = norm_segment.ends_with?('\n') ? norm_segment : "#{norm_segment}\n"
           if target_normalized != segment_normalized && norm_target != norm_segment
-            return {error: "Target content does not match lines #{s_line}..#{e_line} in #{rel_path}"}.to_json
+            return {error: "Target content does not match lines #{s_line}..#{e_line} in #{display_path}"}.to_json
           end
         end
 
@@ -118,20 +118,20 @@ module Nightmare::Tools
         suffix = lines[e_line...total_lines].join
         updated = "#{prefix}#{clean_replacement}#{suffix}"
 
-        diff_text = Diff.unified_diff(original, updated, rel_path)
-        unless approve_mutation?(diff_text, "overwrite #{rel_path} (replace lines #{s_line}..#{e_line})")
+        diff_text = Diff.unified_diff(original, updated, display_path)
+        unless approve_mutation?(diff_text, "overwrite #{display_path} (replace lines #{s_line}..#{e_line})")
           return "[Execution rejected by user]"
         end
 
         File.write(full_path, updated)
-        record_side_effect(rel_path)
+        record_side_effect(display_path)
 
-        return "Successfully replaced lines #{s_line}..#{e_line} in #{rel_path}"
+        return "Successfully replaced lines #{s_line}..#{e_line} in #{display_path}"
       end
 
       # Pure target substring mode
       if target.empty?
-        return {error: "Either target or start_line must be specified for #{rel_path}"}.to_json
+        return {error: "Either target or start_line must be specified for #{display_path}"}.to_json
       end
 
       active_target = target
@@ -152,35 +152,35 @@ module Nightmare::Tools
       end
 
       if count == 0
-        return {error: "Target string not found in #{rel_path}"}.to_json
+        return {error: "Target string not found in #{display_path}"}.to_json
       elsif count > 1
-        return {error: "Target string occurs #{count} times in #{rel_path}; must be unique to replace safely"}.to_json
+        return {error: "Target string occurs #{count} times in #{display_path}; must be unique to replace safely"}.to_json
       end
 
       updated = original.sub(active_target, active_replacement)
-      diff_text = Diff.unified_diff(original, updated, rel_path)
+      diff_text = Diff.unified_diff(original, updated, display_path)
 
-      unless approve_mutation?(diff_text, "overwrite #{rel_path} (replace target)")
+      unless approve_mutation?(diff_text, "overwrite #{display_path} (replace target)")
         return "[Execution rejected by user]"
       end
 
       File.write(full_path, updated)
-      record_side_effect(rel_path)
+      record_side_effect(display_path)
 
-      "Successfully replaced content in #{rel_path}"
+      "Successfully replaced content in #{display_path}"
     end
 
     # Appends content to a file with diff approval if existing
     def append_to_file(path : String, content : String) : String
       full_path = @guard.resolve_write(path)
-      rel_path = Path.new(full_path).relative_to(@guard.root).to_s
+      display_path = format_display_path(full_path)
 
       if File.exists?(full_path)
         original = File.read(full_path)
         updated = original.ends_with?('\n') ? "#{original}#{content}" : "#{original}\n#{content}"
-        diff_text = Diff.unified_diff(original, updated, rel_path)
+        diff_text = Diff.unified_diff(original, updated, display_path)
 
-        unless approve_mutation?(diff_text, "append to #{rel_path}")
+        unless approve_mutation?(diff_text, "append to #{display_path}")
           return "[Execution rejected by user]"
         end
 
@@ -190,8 +190,16 @@ module Nightmare::Tools
         File.write(full_path, content)
       end
 
-      record_side_effect(rel_path)
-      "Successfully appended #{content.bytesize} bytes to #{rel_path}"
+      record_side_effect(display_path)
+      "Successfully appended #{content.bytesize} bytes to #{display_path}"
+    end
+
+    private def format_display_path(full_path : String) : String
+      if @guard.env.inside_root?(full_path)
+        Path.new(full_path).relative_to(@guard.root).to_s
+      else
+        full_path
+      end
     end
 
     private def approve_mutation?(diff : String, desc : String) : Bool

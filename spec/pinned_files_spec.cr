@@ -65,4 +65,30 @@ describe Nightmare::Context::PinnedFiles do
       block.not_nil!.should contain(%({"app":"nightmare"}))
     end
   end
+
+  it "pins and renders files from external readable directories" do
+    with_temp_dir do |root|
+      with_temp_dir do |ext_dir|
+        ext_file = File.join(ext_dir, "shared_skill.md")
+        File.write(ext_file, "# Shared Skill Content")
+
+        env = Nightmare::Workspace::Environment.new(
+          root,
+          ensure_dirs: false,
+          cli_readable_directories: [ext_dir]
+        )
+        guard = Nightmare::Tools::Guard.new(env)
+        calibrator = Nightmare::Context::TokenEstimator.new(3.5)
+        pinned = Nightmare::Context::PinnedFiles.new
+
+        pinned.add(ext_file, guard, calibrator)
+        pinned.files.size.should eq(1)
+
+        block = pinned.render_pinned_block(guard)
+        block.should_not be_nil
+        block.not_nil!.should contain("=== PINNED FILE: #{ext_file} ===")
+        block.not_nil!.should contain("# Shared Skill Content")
+      end
+    end
+  end
 end
