@@ -15,6 +15,7 @@ This file tracks the status and priority of all development tickets for the `nig
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-030](notes/pm/closed/TKT-030-display-cwd-in-cli-prompt.md) | Display Current Working Directory in CLI Interface and Prompt | User Interface & Tooling | Closed | Med | 2026-10-03 |
 | [TKT-029](notes/pm/closed/TKT-029-adaptive-directory-listing-depth-and-budget-limiting.md) | Adaptive Directory Listing Depth and Result Budget Limiting | Harness Stability & Tool Ergonomics | Closed | High | 2026-10-03 |
 | [TKT-026](notes/pm/closed/TKT-026-print-last-utility-command.md) | Utility Command /print_last to Echo Most Recent User Request | User Interface & Tooling | Closed | Med | 2026-10-02 |
 | [TKT-025](notes/pm/closed/TKT-025-factor-resilience-and-subagent-lifecycle-upstream-to-mantle.md) | Factor Resilience, Anti-Derailment, and Subagent Lifecycle Upstream to Mantle | Architecture & Upstream Refactoring | Closed | High | 2026-09-27 |

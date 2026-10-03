@@ -25,6 +25,7 @@ require "./ui/stream_controller"
 require "./ui/turn_presenter"
 require "./ui/cancellation"
 require "./ui/editor"
+require "./ui/prompt"
 require "./commands/router"
 require "./skills"
 
@@ -212,12 +213,16 @@ module Nightmare
       STDOUT.flush
 
       loop do
-        glyph = if active_skill = @skills_manager.active_skill
-                  "#{Salamander::UI::Theme.status_tag}[#{active_skill.name}]#{Salamander::UI::Theme::RESET} #{Salamander::UI::Theme.prompt_glyph}"
-                else
-                  Salamander::UI::Theme.prompt_glyph.to_s
-                end
-        print "#{glyph}#{Salamander::UI::Theme.user_prompt}"
+        cwd = begin
+          Dir.current
+        rescue
+          @env.root
+        end
+        prompt_str = UI::Prompt.render(
+          cwd: cwd,
+          active_skill_name: @skills_manager.active_skill.try(&.name)
+        )
+        print "#{prompt_str}#{Salamander::UI::Theme.user_prompt}"
         STDOUT.flush
 
         line = STDIN.gets
