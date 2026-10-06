@@ -443,6 +443,37 @@ describe Nightmare::Harness::SubagentRunner do
       end
     end
 
+    it "recovers from HTTP 500 no user query found in messages error in subagent" do
+      with_temp_dir do |temp_dir|
+        env = Nightmare::Workspace::Environment.new(
+          root_path: temp_dir,
+          xdg_config_home: File.join(temp_dir, ".config"),
+          xdg_state_home: File.join(temp_dir, ".state"),
+          xdg_cache_home: File.join(temp_dir, ".cache"),
+          ensure_dirs: false
+        )
+        env.settings.context_overflow_retries = 1
+
+        call1 = Mantle::Clients::ToolCall.new(
+          id: "call_overflow_qwen",
+          function: Mantle::Clients::ToolCallFunction.new(name: "read_file", arguments: %({"path":"big.txt"}))
+        )
+        File.write(File.join(temp_dir, "big.txt"), "A" * 2000)
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: nil, tool_calls: [call1]),
+          Mantle::Clients::Response.new(content: "Recovered from Qwen overflow in subagent", tool_calls: nil),
+        ])
+
+        client.raise_on_call[2] = Mantle::Clients::APIError.new(500, %({"error":"no user query found in messages"}))
+
+        runner = Nightmare::Harness::SubagentRunner.new(client: client, environment: env)
+        result = runner.run_subagent("Task with Qwen overflow")
+
+        result.should contain("Recovered from Qwen overflow in subagent")
+      end
+    end
+
     it "trips loop circuit breaker and halts in dispatch" do
       with_temp_dir do |temp_dir|
         env = Nightmare::Workspace::Environment.new(

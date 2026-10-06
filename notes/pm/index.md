@@ -11,12 +11,12 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-013](notes/pm/TKT-013-slash-command-sidechannel-llm-turn.md) | Slash Command for Sidechannel LLM Turn (Dispatch Recipes) | Tooling & Automation | Open | Med | 2024-05-22 |
 | [TKT-027](notes/pm/TKT-027-globally-readable-directories.md) | Globally Readable External Directories for Shared Repositories and Skills | Security & Context Management | Resolved | Med | 2026-10-03 |
 | [TKT-028](notes/pm/TKT-028-globally-writable-directories.md) | Globally Writable External Directories for Multi-Repository and Shared Workspace Mutations | Security & Tool Ergonomics | Resolved | Med | 2026-10-03 |
-| [TKT-031](notes/pm/TKT-031-context-overflow-qwen-missing-user-query.md) | Context Overflow Classification and Large Tool Output Pruning (Qwen Missing User Query) | Context Management & Stability | Open | High | 2026-10-06 |
 | [TKT-033](notes/pm/TKT-033-model-aware-configuration-profiles.md) | Model-Aware Configuration Profiles | Configuration & Model Ergonomics | Open | Med | 2026-10-06 |
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-031](notes/pm/closed/TKT-031-context-overflow-qwen-missing-user-query.md) | Context Overflow Classification and Large Tool Output Pruning (Qwen Missing User Query) | Context Management & Stability | Closed | High | 2026-10-06 |
 | [TKT-032](notes/pm/closed/TKT-032-prevent-spec-suite-xdg-workspace-pollution.md) | Prevent Spec Suite XDG Workspace Pollution in State and Cache Directories | Testing & Workspace Isolation | Closed | High | 2026-10-06 |
 | [TKT-030](notes/pm/closed/TKT-030-display-cwd-in-cli-prompt.md) | Display Current Working Directory in CLI Interface and Prompt | User Interface & Tooling | Closed | Med | 2026-10-03 |
 | [TKT-029](notes/pm/closed/TKT-029-adaptive-directory-listing-depth-and-budget-limiting.md) | Adaptive Directory Listing Depth and Result Budget Limiting | Harness Stability & Tool Ergonomics | Closed | High | 2026-10-03 |

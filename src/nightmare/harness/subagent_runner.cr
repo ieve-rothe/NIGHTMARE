@@ -573,11 +573,16 @@ module Nightmare::Harness
 
     private def context_overflow_error?(result : Mantle::StepResult(String, Mantle::StepError)) : Bool
       return false unless result.err?
+      return true if result.error == Mantle::StepError::ContextOverflow
       if raw = result.raw_response
         return true if raw.truncated?
       end
       if msg = result.error_message
-        return true if msg.includes?("context_length_exceeded") || msg.includes?("maximum context length")
+        return true if msg.includes?("context_length_exceeded") ||
+                       msg.includes?("maximum context length") ||
+                       msg.includes?("context window") ||
+                       msg.includes?("too many tokens") ||
+                       msg.includes?("no user query found in messages")
       end
       false
     end
@@ -593,8 +598,9 @@ module Nightmare::Harness
           hardmax: hardmax,
           trigger_ratio: 0.5,
           keep_chars: 50,
-          keep_verbatim: 1,
-          calibrator: calibrator
+          keep_verbatim: 0,
+          calibrator: calibrator,
+          include_unconsumed: true
         )
       end
     end

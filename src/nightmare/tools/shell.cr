@@ -256,7 +256,7 @@ module Nightmare::Tools
         duration_ms: duration_ms
       )
 
-      formatted
+      Guard.cap_output(formatted, max_bytes: @tool_output_max_bytes)
     end
 
     private def terminate_process_group(pgid : Int64) : Process::Status?

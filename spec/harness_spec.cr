@@ -107,6 +107,39 @@ describe "Nightmare Harness & Step Runner" do
       second_req_chars.should be < first_req_chars
     end
 
+    it "recovers from HTTP 500 no user query found in messages error (Qwen/Ollama template failure)" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      t = store.start_turn("User prompt")
+      c = Mantle::Clients::ToolCall.new(id: "c_find", function: Mantle::Clients::ToolCallFunction.new(name: "find", arguments: "{}"))
+      t.append_assistant(Mantle::Message.new("assistant", nil, tool_calls: [c]))
+      t.append_tool_result(c, "Huge unconsumed tool output " * 200, 4000)
+
+      success_resp = Mantle::Clients::Response.new(
+        content: "Success after recovering from missing user query",
+        tool_calls: nil,
+        prompt_eval_count: 200
+      )
+
+      client = FakeClient.new([success_resp])
+      client.raise_on_call[1] = Mantle::Clients::APIError.new(500, %({"error":"no user query found in messages"}))
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [] of Mantle::Tools::Tool,
+        tool_loop: tool_loop,
+        overflow_retries: 1
+      )
+
+      outcome = runner.run_turn(store)
+      outcome.ok?.should be_true
+      outcome.value.should eq("Success after recovering from missing user query")
+      client.call_count.should eq(2)
+      t.exchanges[0].shed?.should be_true
+    end
+
     it "does not trigger context overflow on network/socket IO errors" do
       store = Nightmare::Context::SlidingStore.new
       calibrator = Nightmare::Context::TokenEstimator.new

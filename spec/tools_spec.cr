@@ -536,6 +536,29 @@ PY
         result.should contain("STDERR:")
       end
     end
+
+    it "caps shell command formatted output at tool_output_max_bytes" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        allowlist = Nightmare::Tools::Allowlist.new
+
+        allowlist.allow_session_prefix(["python3"])
+        script_file = File.join(root, "large_lines.py")
+        File.write(script_file, <<-PY
+import sys
+for i in range(50):
+    print("X" * 100)
+PY
+        )
+
+        shell = Nightmare::Tools::Shell.new(guard, allowlist, tool_output_max_bytes: 1000)
+        result = shell.run_command("python3 large_lines.py", timeout_seconds: 5)
+
+        result.should contain("truncated")
+        result.bytesize.should be <= 1000
+      end
+    end
   end
 
   describe "subagent delegation (spawn_subagent)" do
