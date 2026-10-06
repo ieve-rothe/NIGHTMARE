@@ -8,10 +8,26 @@ def with_temp_dir(& : String -> Nil)
   dir = File.tempfile("nightmare_spec_dir").path
   File.delete(dir) if File.exists?(dir)
   Dir.mkdir_p(dir)
+  real_dir = File.realpath(dir)
   begin
-    yield File.realpath(dir)
+    yield real_dir
   ensure
     FileUtils.rm_rf(dir) if Dir.exists?(dir)
+
+    # Defense-in-depth: Clean up any host XDG workspaces that may have been created for this temp workspace
+    hash = Digest::SHA256.hexdigest(real_dir)[0..7]
+    raw_slug = File.basename(real_dir).gsub(/[^a-zA-Z0-9_-]/, "_")
+    slug = (raw_slug.empty? || raw_slug == "/" || raw_slug == "_") ? "root" : raw_slug
+    ws_id = "#{slug}-#{hash}"
+
+    home = Path.home.to_s
+    [
+      File.join(home, ".local", "state", "nightmare", "workspaces", ws_id),
+      File.join(home, ".cache", "nightmare", "workspaces", ws_id),
+      File.join(home, ".config", "nightmare", "workspaces", ws_id),
+    ].each do |leaked_dir|
+      FileUtils.rm_rf(leaked_dir) if Dir.exists?(leaked_dir)
+    end
   end
 end
 

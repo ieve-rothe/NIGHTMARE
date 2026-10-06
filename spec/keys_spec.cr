@@ -38,7 +38,13 @@ describe Nightmare::Keys do
     ENV.delete("TAVILY_KEY")
 
     with_temp_dir do |root|
-      env = Nightmare::Workspace::Environment.new(root, xdg_config_home: File.join(root, ".config"), ensure_dirs: true)
+      env = Nightmare::Workspace::Environment.new(
+        root,
+        xdg_config_home: File.join(root, ".config"),
+        xdg_state_home: File.join(root, ".state"),
+        xdg_cache_home: File.join(root, ".cache"),
+        ensure_dirs: true
+      )
       key_file = File.join(env.global_keys_dir, "tavily")
       File.write(key_file, "  file-secret-key-789  \n")
 
@@ -56,7 +62,13 @@ describe Nightmare::Keys do
     ENV.delete("TAVILY_KEY")
 
     with_temp_dir do |root|
-      env = Nightmare::Workspace::Environment.new(root, xdg_config_home: File.join(root, ".config"), ensure_dirs: true)
+      env = Nightmare::Workspace::Environment.new(
+        root,
+        xdg_config_home: File.join(root, ".config"),
+        xdg_state_home: File.join(root, ".state"),
+        xdg_cache_home: File.join(root, ".cache"),
+        ensure_dirs: true
+      )
       flat_file = File.join(env.global_config_dir, "tavily_key")
       File.write(flat_file, "flat-key-abc")
 
@@ -74,7 +86,13 @@ describe Nightmare::Keys do
     ENV.delete("TAVILY_KEY")
 
     with_temp_dir do |root|
-      env = Nightmare::Workspace::Environment.new(root, xdg_config_home: File.join(root, ".config"), ensure_dirs: true)
+      env = Nightmare::Workspace::Environment.new(
+        root,
+        xdg_config_home: File.join(root, ".config"),
+        xdg_state_home: File.join(root, ".state"),
+        xdg_cache_home: File.join(root, ".cache"),
+        ensure_dirs: true
+      )
       Dir.mkdir_p(env.workspace_keys_dir)
       ws_key_file = File.join(env.workspace_keys_dir, "tavily")
       File.write(ws_key_file, "ws-specific-key")
@@ -93,7 +111,13 @@ describe Nightmare::Keys do
     ENV.delete("TAVILY_KEY")
 
     with_temp_dir do |root|
-      env = Nightmare::Workspace::Environment.new(root, xdg_config_home: File.join(root, ".config"), ensure_dirs: false)
+      env = Nightmare::Workspace::Environment.new(
+        root,
+        xdg_config_home: File.join(root, ".config"),
+        xdg_state_home: File.join(root, ".state"),
+        xdg_cache_home: File.join(root, ".cache"),
+        ensure_dirs: false
+      )
       expect_raises(Exception, /Missing non_existent API key in ENV or ~\/.config\/nightmare\/keys\/non_existent/) do
         Nightmare::Keys.get!("non_existent", env)
       end
