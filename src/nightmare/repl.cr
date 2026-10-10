@@ -204,7 +204,8 @@ module Nightmare
         current_model: @model_name,
         on_model_change: on_model,
         client: client,
-        skills_manager: @skills_manager
+        skills_manager: @skills_manager,
+        allowlist: @allowlist
       )
     end
 

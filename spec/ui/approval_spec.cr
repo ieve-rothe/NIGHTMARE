@@ -142,14 +142,39 @@ describe Nightmare::UI::Approval do
       edit.should be_nil
     end
 
-    it "returns PrefixSession for 'p'" do
+    it "returns PrefixSession with candidate prefix for 'p'" do
       input = IO::Memory.new("p\n")
       output = IO::Memory.new
       approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
 
       outcome, edit = approval.approve_command("git status", ["git", "status"], false, 30)
       outcome.should eq(Nightmare::Tools::ApprovalOutcome::PrefixSession)
-      edit.should be_nil
+      edit.should eq("git status")
+
+      out_str = output.to_s
+      out_str.should contain("Prefix:")
+      out_str.should contain("git status")
+      out_str.should contain("portion saved if [p] chosen")
+    end
+
+    it "returns PrefixSession with custom prefix for inline 'p <prefix>'" do
+      input = IO::Memory.new("p git status -s\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      outcome, edit = approval.approve_command("git status -s -b", ["git", "status", "-s", "-b"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::PrefixSession)
+      edit.should eq("git status -s")
+    end
+
+    it "returns PrefixSession with custom prefix for 'pe' interactive edit" do
+      input = IO::Memory.new("pe\nsed -n\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      outcome, edit = approval.approve_command("sed -n 1,50p file", ["sed", "-n", "1,50p", "file"], false, 30)
+      outcome.should eq(Nightmare::Tools::ApprovalOutcome::PrefixSession)
+      edit.should eq("sed -n")
     end
 
     it "displays detailed help on '?' and reprompts" do
@@ -192,7 +217,7 @@ describe Nightmare::UI::Approval do
       outcome.should eq(Nightmare::Tools::ApprovalOutcome::Yes)
 
       out_str = output.to_s
-      out_str.should contain("Notice: Unrecognized option 'wat'. Choose [y/N/e/a/p] or '?' for help.")
+      out_str.should contain("Notice: Unrecognized option 'wat'. Choose [y/N/e/a/p/pe] or '?' for help.")
     end
 
     it "defaults to reject on blank enter or EOF" do

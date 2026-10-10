@@ -241,16 +241,21 @@ module Nightmare::UI
 
       @output.puts panel.render_row("Cwd:     #{Salamander::UI::Theme.filename}#{@root}#{Salamander::UI::Theme::RESET}", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_row("Timeout: #{timeout_seconds}s", border, Salamander::UI::BoxStyle::Armored)
+      candidate_prefix = Tools::Allowlist.candidate_prefix(argv)
+      unless has_metachar
+        prefix_tag = "#{Salamander::UI::Theme.status_tag}#{candidate_prefix}#{Salamander::UI::Theme::RESET}"
+        @output.puts panel.render_row("Prefix:  #{prefix_tag} (portion saved if [p] chosen)", border, Salamander::UI::BoxStyle::Armored)
+      end
       if has_metachar
         note = "Note: Shell metacharacters cannot be saved as prefix [p]; [a] saves exact command".colorize(:yellow).to_s
         @output.puts panel.render_row(note, border, Salamander::UI::BoxStyle::Armored)
       end
       @output.puts panel.render_divider(border, Salamander::UI::BoxStyle::Armored)
-      @output.puts panel.render_row("Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix", border, Salamander::UI::BoxStyle::Armored)
+      @output.puts panel.render_row("Approvals: [y] once (don't save)  [N] reject  [e] edit  [a] save exact  [p] save prefix  [pe] edit prefix", border, Salamander::UI::BoxStyle::Armored)
       @output.puts panel.render_footer(border, Salamander::UI::BoxStyle::Armored)
       flush_input
       loop do
-        @output.print "Approve command? [y/N/e/a/p]: "
+        @output.print "Approve command? [y/N/e/a/p/pe]: "
         @output.flush
 
         raw = gets_interactive
@@ -273,19 +278,52 @@ module Nightmare::UI
         when "p"
           if has_metachar
             @output.puts "Notice: Prefix cannot be saved for compound commands. Running once without saving."
+            return {Tools::ApprovalOutcome::PrefixSession, nil}
           end
-          return {Tools::ApprovalOutcome::PrefixSession, nil}
+          return {Tools::ApprovalOutcome::PrefixSession, candidate_prefix}
+        when .starts_with?("p ")
+          if has_metachar
+            @output.puts "Notice: Prefix cannot be saved for compound commands. Running once without saving."
+            return {Tools::ApprovalOutcome::PrefixSession, nil}
+          end
+          custom_p = input[2..].strip
+          if Tools::Allowlist.contains_metacharacters?(custom_p)
+            @output.puts "Notice: Prefix cannot contain shell metacharacters. Action cancelled."
+            next
+          end
+          chosen = custom_p.empty? ? candidate_prefix : custom_p
+          return {Tools::ApprovalOutcome::PrefixSession, chosen}
+        when "pe", "ep"
+          if has_metachar
+            @output.puts "Notice: Prefix cannot be saved for compound commands. Running once without saving."
+            return {Tools::ApprovalOutcome::PrefixSession, nil}
+          end
+
+          @output.print "Prefix to save [Enter for '#{candidate_prefix}', or edit]: "
+          @output.flush
+          p_raw = gets_interactive
+          custom_p = p_raw ? sanitize_terminal_input(p_raw) : ""
+
+          if !custom_p.empty? && Tools::Allowlist.contains_metacharacters?(custom_p)
+            @output.puts "Notice: Prefix cannot contain shell metacharacters. Action cancelled."
+            next
+          end
+
+          chosen_prefix = custom_p.empty? ? candidate_prefix : custom_p
+          return {Tools::ApprovalOutcome::PrefixSession, chosen_prefix}
         when "?", "help"
           @output.puts "\nApproval options:"
           @output.puts "  y - Approve once (don't save)"
           @output.puts "  N - Reject command (default)"
           @output.puts "  e - Edit command inline (re-prompts for approval before running)"
           @output.puts "  a - Save exact command to allowlist (auto-approved in future)"
-          @output.puts "  p - Save command prefix to allowlist (commands matching prefix auto-approved in future)"
+          @output.puts "  p - Save command prefix to allowlist (saves shown prefix candidate; auto-approved in future)"
+          @output.puts "  pe - Edit command prefix before saving (prompts to customize prefix to save)"
+          @output.puts "  p <prefix> - Save specific prefix directly (e.g. 'p sed -n')"
           @output.puts
           next
         else
-          @output.puts "Notice: Unrecognized option '#{input}'. Choose [y/N/e/a/p] or '?' for help."
+          @output.puts "Notice: Unrecognized option '#{input}'. Choose [y/N/e/a/p/pe] or '?' for help."
           next
         end
       end

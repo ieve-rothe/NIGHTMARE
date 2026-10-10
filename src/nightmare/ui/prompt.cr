@@ -22,24 +22,32 @@ module Nightmare::UI
       end
     end
 
-    # Builds the prompt string combining formatted cwd, optional active skill tag, and the theme prompt glyph.
+    # Builds the prompt string combining ambient human-agent pairing header
+    # and an explicit speech-act input line ("You › ").
     def render(
       cwd : String = Dir.current,
       active_skill_name : String? = nil,
       home : String = Path.home.to_s
     ) : String
       display_path = format_path(cwd, home)
-      path_segment = "#{Salamander::UI::Theme.meta_dim}#{display_path}#{Salamander::UI::Theme::RESET}"
+      theme = Salamander::UI::Theme
+
+      reset = Salamander::UI::Theme::RESET
+      glyph_icon = "#{theme.highlight}⯌#{reset}"
+      pairing_label = "#{theme.title}Human ⇄ Assistant#{reset}"
+      dot = "#{theme.meta_dim}·#{reset}"
+      path_segment = "#{theme.meta_dim}#{display_path}#{reset}"
 
       skill_segment = if active_skill_name
-                        " #{Salamander::UI::Theme.status_tag}[#{active_skill_name}]#{Salamander::UI::Theme::RESET}"
+                        " #{theme.status_tag}[#{active_skill_name}]#{reset}"
                       else
                         ""
                       end
 
-      glyph = Salamander::UI::Theme.prompt_glyph.to_s
+      header = "#{glyph_icon} #{pairing_label} #{dot} #{path_segment}#{skill_segment}"
+      lead = "#{theme.status_tag}You#{reset} #{theme.prompt_glyph}"
 
-      "#{path_segment}#{skill_segment} #{glyph}"
+      "#{header}\n#{lead}"
     end
   end
 end

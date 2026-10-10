@@ -615,4 +615,66 @@ describe Nightmare::Commands::Router do
       end
     end
   end
+
+  it "inspects and manages pre-approved commands via /allowlist and /approvals" do
+    with_temp_dir do |root|
+      allow_file = File.join(root, "allow")
+      File.write(allow_file, "prefix:git status\nprefix:sed -n\nls -la\n")
+
+      env = Nightmare::Workspace::Environment.new(root_path: root, ensure_dirs: false)
+      allowlist = Nightmare::Tools::Allowlist.new(allow_file)
+      stdout = IO::Memory.new
+
+      router = Nightmare::Commands::Router.new(
+        store: Nightmare::Context::SlidingStore.new,
+        pinned_files: Nightmare::Context::PinnedFiles.new,
+        calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+        guard: Nightmare::Tools::Guard.new(env),
+        env: env,
+        transcript: Nightmare::Transcript.new(root, enabled: false),
+        current_prompt: "Test",
+        current_model: "test-model",
+        stdout: stdout,
+        allowlist: allowlist
+      )
+
+      # 1. /allowlist displays allow file and entries
+      stdout.clear
+      handled, _ = router.handle("/allowlist")
+      handled.should be_true
+      out_str = stdout.to_s
+      out_str.should contain("Pre-Approved Shell Commands & Allowlist")
+      out_str.should contain(allow_file)
+      out_str.should contain("prefix:git status")
+      out_str.should contain("prefix:sed -n")
+      out_str.should contain("ls -la")
+
+      # 2. /approvals alias works
+      stdout.clear
+      handled, _ = router.handle("/approvals")
+      handled.should be_true
+      stdout.to_s.should contain("Pre-Approved Shell Commands & Allowlist")
+
+      # 3. /allowlist path echoes path
+      stdout.clear
+      handled, _ = router.handle("/allowlist path")
+      handled.should be_true
+      stdout.to_s.strip.should eq(allow_file)
+
+      # 4. /allowlist rm removes an entry
+      stdout.clear
+      handled, _ = router.handle("/allowlist rm prefix:sed -n")
+      handled.should be_true
+      stdout.to_s.should contain("Removed rule 'prefix:sed -n' from allowlist")
+      allowlist.persistent_prefix.should_not contain("sed -n")
+
+      # 5. /allowlist clear wipes rules
+      stdout.clear
+      handled, _ = router.handle("/allowlist clear")
+      handled.should be_true
+      stdout.to_s.should contain("Cleared all pre-approved commands and prefixes")
+      allowlist.persistent_prefix.should be_empty
+      allowlist.persistent_exact.should be_empty
+    end
+  end
 end

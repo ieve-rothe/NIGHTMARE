@@ -7,6 +7,7 @@ require "../context/pinned_files"
 require "../context/token_calibrator"
 require "../transcript"
 require "../tools/guard"
+require "../tools/allowlist"
 require "../workspace/environment"
 require "../plan"
 require "../harness/subagent_runner"
@@ -22,6 +23,7 @@ module Nightmare::Commands
     getter guard : Tools::Guard
     getter env : Workspace::Environment
     getter skills_manager : Skills::SkillManager
+    getter allowlist : Tools::Allowlist
     property transcript : Transcript
     property current_prompt : String
     property current_model : String
@@ -49,9 +51,11 @@ module Nightmare::Commands
       @pacer : Nightmare::Plan::Pacer = Nightmare::Plan::Pacer.new,
       @stdin : IO = STDIN,
       @stdout : IO = STDOUT,
-      skills_manager : Skills::SkillManager? = nil
+      skills_manager : Skills::SkillManager? = nil,
+      allowlist : Tools::Allowlist? = nil
     )
       @skills_manager = skills_manager || Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
+      @allowlist = allowlist || Tools::Allowlist.new(@env.allowlist_path)
     end
 
     # Checks if an input line is a slash command or multiline trigger
@@ -135,6 +139,9 @@ module Nightmare::Commands
       when "/skill"
         handle_skill(args)
         {true, nil}
+      when "/allowlist", "/approvals"
+        handle_allowlist(args)
+        {true, nil}
       when "/exit", "/quit"
         exit(0)
       else
@@ -160,6 +167,7 @@ module Nightmare::Commands
       puts <<-HELP
 Available Slash Commands:
   /help            Show this help reference
+  /allowlist       Inspect or manage pre-approved shell commands (/approvals)
   /plan run <file> Execute autonomous plan in isolated Git worktree
   /plan status [id]Inspect active or recent plan run state
   /plan report [id]Generate comprehensive plan report & telemetry
@@ -330,6 +338,99 @@ HELP
         puts "Activated skill '#{curr.name}' (~#{tok} tokens)."
       when Skills::ToggleStatus::NotFound
         puts "No skill found matching '#{trimmed}'. Run /skill to see available skills."
+      end
+    end
+
+    private def handle_allowlist(args : String) : Nil
+      parts = args.split(' ', 2)
+      subcmd = parts[0].downcase
+      subarg = parts.size > 1 ? parts[1].strip : ""
+
+      allow_path = @allowlist.allowlist_path || File.join(@env.workspace_config_dir, "allow")
+
+      case subcmd
+      when "path"
+        puts allow_path
+      when "clear"
+        @allowlist.clear_all!
+        puts "Cleared all pre-approved commands and prefixes."
+      when "rm", "remove", "drop"
+        if subarg.empty?
+          puts "Usage: /allowlist rm <rule> (e.g. /allowlist rm git status, /allowlist rm prefix:sed -n)"
+          return
+        end
+        if @allowlist.remove_entry(subarg)
+          puts "Removed rule '#{subarg}' from allowlist."
+        else
+          puts "Rule '#{subarg}' not found in allowlist."
+        end
+      when ""
+        puts "\n=== Pre-Approved Shell Commands & Allowlist ==="
+        puts "Allowlist file: #{Salamander::UI::Theme.filename}#{allow_path}#{Salamander::UI::Theme::RESET}"
+        puts
+
+        has_entries = false
+
+        unless @allowlist.persistent_prefix.empty?
+          has_entries = true
+          puts "--- Persisted Prefixes (auto-approved commands starting with tokens) ---"
+          @allowlist.persistent_prefix.each do |p|
+            puts "  #{Salamander::UI::Theme.status_tag}prefix:#{p}#{Salamander::UI::Theme::RESET}"
+          end
+          puts
+        end
+
+        unless @allowlist.persistent_exact.empty?
+          has_entries = true
+          puts "--- Persisted Exact Commands ---"
+          @allowlist.persistent_exact.each do |e|
+            puts "  #{Salamander::UI::Theme.code_text}#{e}#{Salamander::UI::Theme::RESET}"
+          end
+          puts
+        end
+
+        unless @allowlist.persistent_patterns.empty?
+          has_entries = true
+          puts "--- Persisted Regex Patterns ---"
+          @allowlist.persistent_patterns.each do |pat|
+            puts "  #{Salamander::UI::Theme.highlight}#{pat.source}#{Salamander::UI::Theme::RESET}"
+          end
+          puts
+        end
+
+        session_only_prefixes = @allowlist.session_prefix - @allowlist.persistent_prefix
+        unless session_only_prefixes.empty?
+          has_entries = true
+          puts "--- Session-Only Prefixes ---"
+          session_only_prefixes.each do |p|
+            puts "  #{Salamander::UI::Theme.status_tag}prefix:#{p}#{Salamander::UI::Theme::RESET}"
+          end
+          puts
+        end
+
+        session_only_exact = @allowlist.session_exact - @allowlist.persistent_exact
+        unless session_only_exact.empty?
+          has_entries = true
+          puts "--- Session-Only Exact Commands ---"
+          session_only_exact.each do |e|
+            puts "  #{Salamander::UI::Theme.code_text}#{e}#{Salamander::UI::Theme::RESET}"
+          end
+          puts
+        end
+
+        unless has_entries
+          puts "No pre-approved commands found. Save commands via [a] (exact) or [p] (prefix) in approval prompts."
+          puts
+        end
+
+        puts "Commands:"
+        puts "  /allowlist            - View all pre-approved commands and allow file path"
+        puts "  /allowlist path       - Print absolute path to allow file"
+        puts "  /allowlist rm <rule>  - Remove a pre-approved rule"
+        puts "  /allowlist clear      - Clear all pre-approved rules"
+        puts
+      else
+        puts "Unknown option '#{subcmd}'. Run /allowlist to view allowlist or /allowlist path."
       end
     end
 

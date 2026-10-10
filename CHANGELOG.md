@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Generalized Prefix Allowlisting & Candidate Deduction (TKT-035)**: Generalized tokenized prefix matching in `Allowlist#matches?`, supporting arbitrary command prefixes (e.g. `sed -n`, `git status`, `cat`) without being restricted to a hardcoded binary list. Fixed silent degradation where non-subcommand utilities with arguments degraded to exact matches.
+- **Prefix Candidate Visibility & Modal Customization (TKT-035)**: Security gateway approval modal displays candidate prefixes (`Prefix: <candidate>`). Added one-key candidate saving with `[p]`, inline custom prefixes with `p <prefix>`, and interactive customization with `[pe]`.
+- **Pre-Approved Command Inspection & Management (TKT-035)**: Added `/allowlist` (alias `/approvals`) slash command to view the allow file path (`$XDG_CONFIG_HOME/nightmare/workspaces/<id>/allow`), view active persistent and session-only rules, and prune entries via `/allowlist rm <rule>` and `/allowlist clear`.
 - **Shell Tool Alias (TKT-034)**: Configured `"shell"` as an alias for `run_command` in `Tools::Registry` across both primary and subagent toolsets, aligning execution with `TurnPresenter`.
+- **Display Working Directory in CLI Prompt (TKT-030)**: Render the active workspace / target working directory path in the interactive REPL prompt.
+- **Ambient Human-Agent Pairing Header & Speech-Act Prompt (UI)**: Enhanced CLI prompt with ambient pairing header (`Human ⇄ Assistant`) and explicit speech-act lead (`You › `).
+
+### Fixed
+- **Context Overflow Recovery & Shell Output Capping (TKT-031)**: Gracefully recover when model responses omit user query blocks due to overflow, and cap shell output to prevent runaway token exhaustion.
+- **Spec Suite Workspace Isolation (TKT-032)**: Prevent test suite runs from polluting real user XDG directories by isolating cache, state, and config directories.
 
 ## [0.5.0] - 2026-10-03
 

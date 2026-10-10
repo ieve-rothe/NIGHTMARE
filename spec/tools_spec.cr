@@ -780,18 +780,38 @@ PY
       end
     end
 
-    it "restricts operand prefix approvals and prevents trailing file exfiltration (VULN-04)" do
+    it "deduces prefix candidates and supports generalized tokenized prefix approvals" do
+      # Candidate deduction across tool types
+      Nightmare::Tools::Allowlist.candidate_prefix(["git", "status", "-s"]).should eq("git status")
+      Nightmare::Tools::Allowlist.candidate_prefix(["crystal", "spec", "spec/tools_spec.cr"]).should eq("crystal spec")
+      Nightmare::Tools::Allowlist.candidate_prefix(["sed", "-n", "51,100p", "file.sh"]).should eq("sed -n")
+      Nightmare::Tools::Allowlist.candidate_prefix(["head", "-n", "20", "file.txt"]).should eq("head -n")
+      Nightmare::Tools::Allowlist.candidate_prefix(["grep", "-rn", "foo", "src/"]).should eq("grep -rn")
+      Nightmare::Tools::Allowlist.candidate_prefix(["cat", "PROGRESS.md"]).should eq("cat")
+      Nightmare::Tools::Allowlist.candidate_prefix(["ls", "-la"]).should eq("ls -la")
+
       allowlist = Nightmare::Tools::Allowlist.new
 
-      # Approving prefix on an operand-based utility (cat) saves exact command, not open prefix
-      allowlist.allow_session_prefix(["cat", "PROGRESS.md"])
+      # Approving candidate prefix for repetitive reads (sed -n)
+      allowlist.allow_session_prefix(["sed", "-n", "1,50p", "file.sh"])
+      allowlist.session_prefix.should contain("sed -n")
 
-      # Genuine command is allowed
+      # Subsequent slices match the prefix
+      allowlist.auto_approvable?("sed -n 51,100p file.sh", ["sed", "-n", "51,100p", "file.sh"]).should be_true
+      allowlist.auto_approvable?("sed -n 101,150p other.sh", ["sed", "-n", "101,150p", "other.sh"]).should be_true
+      # Mutating or different flag does NOT match prefix
+      allowlist.auto_approvable?("sed -i s/a/b/ file.sh", ["sed", "-i", "s/a/b/", "file.sh"]).should be_false
+
+      # Approving a specific edited prefix (e.g. cat PROGRESS.md)
+      allowlist.allow_session_prefix("cat PROGRESS.md")
       allowlist.auto_approvable?("cat PROGRESS.md", ["cat", "PROGRESS.md"]).should be_true
-
-      # Trailing file exfiltration attempt is blocked
-      allowlist.auto_approvable?("cat PROGRESS.md /etc/shadow", ["cat", "PROGRESS.md", "/etc/shadow"]).should be_false
+      # Different operand is blocked when explicit prefix was narrowed
       allowlist.auto_approvable?("cat /etc/shadow", ["cat", "/etc/shadow"]).should be_false
+
+      # Commands with metacharacters (pipes, semicolons, redirects) are strictly barred from prefix auto-approval
+      allowlist.auto_approvable?("sed -n 1,50p file.sh | grep foo", ["sed", "-n", "1,50p", "file.sh", "|", "grep", "foo"]).should be_false
+      allowlist.auto_approvable?("sed -n 1,50p file.sh; rm -rf /", ["sed", "-n", "1,50p", "file.sh;", "rm", "-rf", "/"]).should be_false
+      allowlist.auto_approvable?("sed -n 1,50p file.sh > /tmp/out", ["sed", "-n", "1,50p", "file.sh", ">", "/tmp/out"]).should be_false
 
       # Subcommand utility (git) allows subcommands
       allowlist.allow_session_prefix(["git", "status"])

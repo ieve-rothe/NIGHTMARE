@@ -13,6 +13,7 @@ module Nightmare::Tools
     getter persistent_exact : Set(String)
     getter persistent_prefix : Set(String)
     getter persistent_patterns : Array(Regex)
+    getter parsed_prefixes : Array(Array(String))
 
     # Characters that bar auto-approval and force interactive confirmation (R3 / §4.2)
     METACHARACTERS = [
@@ -38,6 +39,7 @@ module Nightmare::Tools
       @persistent_exact = Set(String).new
       @persistent_prefix = Set(String).new
       @persistent_patterns = [] of Regex
+      @parsed_prefixes = [] of Array(String)
 
       load_persistent
     end
@@ -157,6 +159,20 @@ module Nightmare::Tools
       false
     end
 
+    # Deduces the default prefix candidate from argv
+    def self.candidate_prefix(argv : Array(String)) : String
+      return "" if argv.empty?
+      binary = File.basename(argv[0])
+
+      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
+        "#{binary} #{argv[1]}"
+      elsif argv.size > 1 && argv[1].starts_with?('-') && !argv[1].starts_with?("--")
+        "#{binary} #{argv[1]}"
+      else
+        binary
+      end
+    end
+
     # Checks if argv matches session or persisted allowlists
     def matches?(argv : Array(String)) : Bool
       return false if argv.empty?
@@ -165,15 +181,12 @@ module Nightmare::Tools
       return true if @session_exact.includes?(exact_key) || @persistent_exact.includes?(exact_key)
       return true if @persistent_patterns.any? { |re| exact_key =~ re }
 
-      binary = File.basename(argv[0])
-
-      # 1. Exact binary prefix (e.g. "sleep", "ls", "python3")
-      return true if @session_prefix.includes?(binary) || @persistent_prefix.includes?(binary)
-
-      # 2. Subcommand prefix (e.g. "git status", "crystal spec")
-      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
-        subcommand_key = "#{binary} #{argv[1]}"
-        return true if @session_prefix.includes?(subcommand_key) || @persistent_prefix.includes?(subcommand_key)
+      @parsed_prefixes.each do |p_tokens|
+        next if argv.size < p_tokens.size
+        next unless File.basename(argv[0]) == p_tokens[0]
+        if p_tokens.size == 1 || argv[1...p_tokens.size] == p_tokens[1...]
+          return true
+        end
       end
 
       false
@@ -218,34 +231,94 @@ module Nightmare::Tools
       allow_persist_exact(argv.join(" "))
     end
 
-    # Records a prefix approval (argv[0] + argv[1]) for the active session
-    def allow_session_prefix(argv : Array(String)) : Nil
-      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
-      binary = File.basename(argv[0])
-
-      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
-        @session_prefix.add("#{binary} #{argv[1]}")
-      elsif argv.size == 1
-        @session_prefix.add(binary)
-      else
-        allow_session_exact(argv)
+    # Records a prefix approval for the active session (by string or argv candidate)
+    def allow_session_prefix(prefix : String) : Nil
+      cmd = prefix.strip
+      return if cmd.empty? || self.class.contains_metacharacters?(cmd) || self.class.has_dangerous_control_characters?(cmd)
+      tokens = begin
+        self.class.tokenize(cmd)
+      rescue
+        return
       end
+      return if tokens.empty? || self.class.has_denylisted_flags?(tokens)
+      @session_prefix.add(tokens.join(" "))
+      rebuild_parsed_prefixes
     end
 
-    # Persists a prefix or exact command to $XDG_CONFIG_HOME/.../allow
+    def allow_session_prefix(argv : Array(String)) : Nil
+      return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
+      candidate = self.class.candidate_prefix(argv)
+      allow_session_prefix(candidate)
+    end
+
+    # Persists a prefix approval to $XDG_CONFIG_HOME/.../allow (by string or argv candidate)
+    def allow_persist_prefix(prefix : String) : Nil
+      cmd = prefix.strip
+      return if cmd.empty? || self.class.contains_metacharacters?(cmd) || self.class.has_dangerous_control_characters?(cmd)
+      tokens = begin
+        self.class.tokenize(cmd)
+      rescue
+        return
+      end
+      return if tokens.empty? || self.class.has_denylisted_flags?(tokens)
+      @persistent_prefix.add(tokens.join(" "))
+      rebuild_parsed_prefixes
+      save_persistent
+    end
+
     def allow_persist_prefix(argv : Array(String)) : Nil
       return if argv.empty? || argv.any? { |a| self.class.contains_metacharacters?(a) }
-      binary = File.basename(argv[0])
+      candidate = self.class.candidate_prefix(argv)
+      allow_persist_prefix(candidate)
+    end
 
-      if SUBCOMMAND_BINARIES.includes?(binary) && argv.size > 1 && !argv[1].starts_with?('-')
-        @persistent_prefix.add("#{binary} #{argv[1]}")
-        save_persistent
-      elsif argv.size == 1
-        @persistent_prefix.add(binary)
-        save_persistent
+    # Clears all allowlist rules in memory and on disk
+    def clear_all! : Nil
+      @session_exact.clear
+      @session_prefix.clear
+      @persistent_exact.clear
+      @persistent_prefix.clear
+      @persistent_patterns.clear
+      rebuild_parsed_prefixes
+      save_persistent
+    end
+
+    # Removes a specific allowlist entry (e.g. "git status" or "prefix:sed -n")
+    def remove_entry(entry : String) : Bool
+      target = entry.strip
+      removed = false
+      if target.starts_with?("prefix:")
+        val = target[7..].strip
+        removed = @persistent_prefix.delete(val) || @session_prefix.delete(val)
       else
-        allow_persist_exact(argv)
+        removed = @persistent_exact.delete(target) || @session_exact.delete(target) ||
+                  @persistent_prefix.delete(target) || @session_prefix.delete(target)
+        prev_pats = @persistent_patterns.size
+        @persistent_patterns.reject! { |re| re.source == target }
+        removed ||= (@persistent_patterns.size < prev_pats)
       end
+      if removed
+        rebuild_parsed_prefixes
+        save_persistent
+      end
+      removed
+    end
+
+    private def rebuild_parsed_prefixes : Nil
+      all_prefixes = @session_prefix | @persistent_prefix
+      parsed = [] of Array(String)
+      all_prefixes.each do |p_str|
+        trimmed = p_str.strip
+        next if trimmed.empty?
+        begin
+          tokens = self.class.tokenize(trimmed)
+          parsed << tokens unless tokens.empty?
+        rescue
+          parts = trimmed.split(/\s+/).reject(&.empty?)
+          parsed << parts unless parts.empty?
+        end
+      end
+      @parsed_prefixes = parsed
     end
 
     private def load_persistent : Nil
@@ -267,6 +340,8 @@ module Nightmare::Tools
           @persistent_exact.add(trimmed)
         end
       end
+
+      rebuild_parsed_prefixes
     end
 
     private def save_persistent : Nil

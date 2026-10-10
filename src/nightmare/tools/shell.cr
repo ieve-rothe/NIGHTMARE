@@ -125,15 +125,11 @@ module Nightmare::Tools
             when Mantle::Tools::PolicyDecisionKind::AllowSession
               @allowlist.allow_session_exact(cmd_to_run)
               @allowlist.allow_persist_exact(cmd_to_run)
-            when Mantle::Tools::PolicyDecisionKind::AllowPrefixSession
+            when Mantle::Tools::PolicyDecisionKind::AllowPrefixSession, Mantle::Tools::PolicyDecisionKind::AllowPrefixPersist
               unless has_metachar
-                @allowlist.allow_session_prefix(argv)
-                @allowlist.allow_persist_prefix(argv)
-              end
-            when Mantle::Tools::PolicyDecisionKind::AllowPrefixPersist
-              unless has_metachar
-                @allowlist.allow_session_prefix(argv)
-                @allowlist.allow_persist_prefix(argv)
+                prefix_to_save = decision.edited_value || Allowlist.candidate_prefix(argv)
+                @allowlist.allow_session_prefix(prefix_to_save)
+                @allowlist.allow_persist_prefix(prefix_to_save)
               end
             when Mantle::Tools::PolicyDecisionKind::Edit
               if edited = decision.edited_value
@@ -153,15 +149,11 @@ module Nightmare::Tools
             when ApprovalOutcome::AllSession
               @allowlist.allow_session_exact(cmd_to_run)
               @allowlist.allow_persist_exact(cmd_to_run)
-            when ApprovalOutcome::PrefixSession
+            when ApprovalOutcome::PrefixSession, ApprovalOutcome::PrefixPersist
               unless has_metachar
-                @allowlist.allow_session_prefix(argv)
-                @allowlist.allow_persist_prefix(argv)
-              end
-            when ApprovalOutcome::PrefixPersist
-              unless has_metachar
-                @allowlist.allow_session_prefix(argv)
-                @allowlist.allow_persist_prefix(argv)
+                prefix_to_save = edit_value || Allowlist.candidate_prefix(argv)
+                @allowlist.allow_session_prefix(prefix_to_save)
+                @allowlist.allow_persist_prefix(prefix_to_save)
               end
             when ApprovalOutcome::Edit
               if edited = edit_value

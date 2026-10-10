@@ -25,28 +25,43 @@ describe Nightmare::UI::Prompt do
   end
 
   describe ".render" do
-    it "renders formatted path and prompt glyph" do
+    it "renders formatted path, speech-act header, and prompt glyph" do
       res = Nightmare::UI::Prompt.render(
         cwd: "/home/user/repos/adjutant",
         active_skill_name: nil,
         home: "/home/user"
       )
 
+      res.should contain("Human ⇄ Assistant")
+      res.should contain("⯌")
       res.should contain("~/repos/adjutant")
+      res.should contain("You")
       res.should contain(Salamander::UI::Theme.prompt_glyph.to_s)
       res.should_not contain("[deploy-runner]")
+
+      lines = res.split('\n')
+      lines.size.should eq(2)
+      lines[0].should contain("Human ⇄ Assistant")
+      lines[0].should contain("~/repos/adjutant")
+      lines[1].should contain("You")
     end
 
-    it "includes active skill tag when present" do
+    it "includes active skill tag in pairing header when present" do
       res = Nightmare::UI::Prompt.render(
         cwd: "/home/user/repos/adjutant",
         active_skill_name: "deploy-runner",
         home: "/home/user"
       )
 
+      res.should contain("Human ⇄ Assistant")
       res.should contain("~/repos/adjutant")
       res.should contain("[deploy-runner]")
+      res.should contain("You")
       res.should contain(Salamander::UI::Theme.prompt_glyph.to_s)
+
+      lines = res.split('\n')
+      lines.size.should eq(2)
+      lines[0].should contain("[deploy-runner]")
     end
   end
 end
