@@ -32,7 +32,7 @@ module Nightmare::Tools
       default_command_timeout : Int32 = Config::SHELL_COMMAND_TIMEOUT_SECONDS,
       max_command_timeout : Int32 = Config::SHELL_COMMAND_MAX_TIMEOUT_SECONDS,
       tool_output_max_bytes : Int32 = Config::TOOL_OUTPUT_MAX_BYTES,
-      @subagent_runner : Harness::SubagentRunner? = nil
+      @subagent_runner : Harness::SubagentRunner? = nil,
     )
       @read_only = ReadOnly.new(@guard, pinned_files)
       @mutation = Mutation.new(@guard, diff_approval)
@@ -220,7 +220,7 @@ module Nightmare::Tools
       schema = Mantle::Tools::ParametersSchema.new(props, ["command"])
       func = Mantle::Tools::FunctionDefinition.new("run_command", "Executes command via argv supervisor in isolated process group.", schema)
 
-      Mantle::Tools::Tool.new(func) do |args|
+      Mantle::Tools::Tool.new(func, aliases: ["shell"]) do |args|
         cmd = args["command"]?.try(&.as_s) || ""
         raw_to = args["timeout"]? || args["timeout_seconds"]?
         timeout = raw_to.try(&.as_i?) || raw_to.try(&.as_s?.try(&.to_i?))
@@ -264,7 +264,7 @@ module Nightmare::Tools
     end
 
     private def build_web_search_tool : Mantle::Tools::Tool
-      Mantle::Tools::Builtin::WebSearch.create(->{ Keys.get?("tavily", @guard.env) })
+      Mantle::Tools::Builtin::WebSearch.create(-> { Keys.get?("tavily", @guard.env) })
     end
   end
 end

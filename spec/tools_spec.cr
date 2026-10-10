@@ -580,6 +580,23 @@ PY
       end
     end
 
+    it "configures run_command with shell alias in both primary and subagent toolsets" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        client = FakeClient.new
+        registry = Nightmare::Tools::Registry.new(guard, client)
+
+        primary_run = registry.build_tools.find { |t| t.function.name == "run_command" }
+        primary_run.should_not be_nil
+        primary_run.not_nil!.aliases.should contain("shell")
+
+        subagent_run = registry.build_subagent_tools.find { |t| t.function.name == "run_command" }
+        subagent_run.should_not be_nil
+        subagent_run.not_nil!.aliases.should contain("shell")
+      end
+    end
+
     it "returns error when no subagent runner is configured" do
       with_temp_dir do |root|
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
@@ -600,7 +617,7 @@ PY
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
         guard = Nightmare::Tools::Guard.new(env)
         client = FakeClient.new([
-          Mantle::Clients::Response.new(content: "[SUMMARY]\nFound 3 occurrences of issue", tool_calls: nil)
+          Mantle::Clients::Response.new(content: "[SUMMARY]\nFound 3 occurrences of issue", tool_calls: nil),
         ])
         runner = Nightmare::Harness::SubagentRunner.new(client, env)
         registry = Nightmare::Tools::Registry.new(guard, client, subagent_runner: runner)
@@ -618,7 +635,7 @@ PY
         env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
         guard = Nightmare::Tools::Guard.new(env)
         client = FakeClient.new([
-          Mantle::Clients::Response.new(content: "[SUMMARY]\nDone in budget", tool_calls: nil)
+          Mantle::Clients::Response.new(content: "[SUMMARY]\nDone in budget", tool_calls: nil),
         ])
         runner = Nightmare::Harness::SubagentRunner.new(client, env)
         registry = Nightmare::Tools::Registry.new(guard, client, subagent_runner: runner)
@@ -630,8 +647,8 @@ PY
         props.has_key?("budget_iterations").should be_true
 
         result = tool.not_nil!.execute({
-          "task" => JSON::Any.new("test budget"),
-          "budget_iterations" => JSON::Any.new(3_i64)
+          "task"              => JSON::Any.new("test budget"),
+          "budget_iterations" => JSON::Any.new(3_i64),
         })
         result.should contain("Done in budget")
       end
@@ -904,4 +921,3 @@ PY
     end
   end
 end
-

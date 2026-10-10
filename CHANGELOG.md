@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Shell Tool Alias (TKT-034)**: Configured `"shell"` as an alias for `run_command` in `Tools::Registry` across both primary and subagent toolsets, aligning execution with `TurnPresenter`.
+
 ## [0.5.0] - 2026-10-03
 
 ### Added

@@ -12,6 +12,7 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-027](notes/pm/TKT-027-globally-readable-directories.md) | Globally Readable External Directories for Shared Repositories and Skills | Security & Context Management | Resolved | Med | 2026-10-03 |
 | [TKT-028](notes/pm/TKT-028-globally-writable-directories.md) | Globally Writable External Directories for Multi-Repository and Shared Workspace Mutations | Security & Tool Ergonomics | Resolved | Med | 2026-10-03 |
 | [TKT-033](notes/pm/TKT-033-model-aware-configuration-profiles.md) | Model-Aware Configuration Profiles | Configuration & Model Ergonomics | Open | Med | 2026-10-06 |
+| [TKT-034](notes/pm/TKT-034-resilient-unknown-tool-handling-and-shell-alias.md) | Resilient Unknown Tool Handling in Mantle Step and Shell Tool Alias in Nightmare | Harness Stability & Tool Ergonomics | Resolved | High | 2026-10-10 |
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |

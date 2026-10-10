@@ -30,7 +30,7 @@ describe "Nightmare Harness & Step Runner" do
       tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
 
       client = FakeClient.new([
-        Mantle::Clients::Response.new(content: "Chunk 1", tool_calls: nil)
+        Mantle::Clients::Response.new(content: "Chunk 1", tool_calls: nil),
       ])
 
       runner = Nightmare::Harness::StepRunner.new(
@@ -247,7 +247,7 @@ describe "Nightmare Harness & Step Runner" do
       orchestrator_store.start_turn("Orchestrator prompt")
 
       subagent_client = FakeClient.new([
-        Mantle::Clients::Response.new(content: "Subagent answer", tool_calls: nil)
+        Mantle::Clients::Response.new(content: "Subagent answer", tool_calls: nil),
       ])
 
       runner = Nightmare::Harness::StepRunner.new(
@@ -332,6 +332,78 @@ describe "Nightmare Harness & Step Runner" do
       expect_raises(TypeCastError, "cast bug") do
         hardened[2].execute({} of String => JSON::Any)
       end
+    end
+
+    it "handles unknown tool calls gracefully with model self-correction without crashing turn" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      call_unk = Mantle::Clients::ToolCall.new(
+        id: "call_unk",
+        function: Mantle::Clients::ToolCallFunction.new(name: "hallucinated_tool", arguments: "{}")
+      )
+
+      client = FakeClient.new([
+        Mantle::Clients::Response.new(content: nil, tool_calls: [call_unk]),
+        Mantle::Clients::Response.new(content: "Recovered from unknown tool", tool_calls: nil),
+      ])
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [] of Mantle::Tools::Tool,
+        tool_loop: tool_loop
+      )
+
+      store.start_turn("Try unknown tool")
+      outcome = runner.run_turn(store)
+
+      outcome.ok?.should be_true
+      outcome.value.should eq("Recovered from unknown tool")
+      store.history.size.should eq(1)
+      store.history.first.last_assistant_text.should eq("Recovered from unknown tool")
+    end
+
+    it "dispatches tool call via alias to underlying tool handler in StepRunner" do
+      store = Nightmare::Context::SlidingStore.new
+      calibrator = Nightmare::Context::TokenEstimator.new
+      tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+      call_alias = Mantle::Clients::ToolCall.new(
+        id: "call_alias",
+        function: Mantle::Clients::ToolCallFunction.new(name: "shell", arguments: %({"command": "echo test"}))
+      )
+
+      client = FakeClient.new([
+        Mantle::Clients::Response.new(content: nil, tool_calls: [call_alias]),
+        Mantle::Clients::Response.new(content: "Command ran via alias", tool_calls: nil),
+      ])
+
+      executed = false
+      tool = Mantle::Tools::Tool.new(
+        function: Mantle::Tools::FunctionDefinition.new(
+          name: "run_command",
+          description: "Runs command",
+          parameters: Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+        ),
+        aliases: ["shell"]
+      ) do |_|
+        executed = true
+        "test output"
+      end
+
+      runner = Nightmare::Harness::StepRunner.new(
+        client: client,
+        tools: [tool],
+        tool_loop: tool_loop
+      )
+
+      store.start_turn("Run via alias")
+      outcome = runner.run_turn(store)
+
+      outcome.ok?.should be_true
+      executed.should be_true
+      outcome.value.should eq("Command ran via alias")
     end
   end
 end
