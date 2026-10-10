@@ -31,7 +31,7 @@ require "./nightmare/harness/subagent_runner"
 require "./nightmare/repl"
 
 module Nightmare
-  VERSION = "0.5.0"
+  VERSION = "0.6.0"
 
   module CLI
     struct Options

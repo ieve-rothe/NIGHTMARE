@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+
 ### Added
 - **Generalized Prefix Allowlisting & Candidate Deduction (TKT-035)**: Generalized tokenized prefix matching in `Allowlist#matches?`, supporting arbitrary command prefixes (e.g. `sed -n`, `git status`, `cat`) without being restricted to a hardcoded binary list. Fixed silent degradation where non-subcommand utilities with arguments degraded to exact matches.
 - **Prefix Candidate Visibility & Modal Customization (TKT-035)**: Security gateway approval modal displays candidate prefixes (`Prefix: <candidate>`). Added one-key candidate saving with `[p]`, inline custom prefixes with `p <prefix>`, and interactive customization with `[pe]`.
