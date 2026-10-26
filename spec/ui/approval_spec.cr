@@ -21,6 +21,20 @@ describe Nightmare::UI::Approval do
       out_str.should contain("+new line")
     end
 
+    it "renders warning banner and colored prompt when mutation is outside pwd (TKT-037)" do
+      input = IO::Memory.new("y\n")
+      output = IO::Memory.new
+      approval = Nightmare::UI::Approval.new("/tmp/workspace", input: input, output: output)
+
+      diff_content = "+[Unit]\n+Description=Test"
+      result = approval.approve_diff(diff_content, "create new file ~/.config/systemd/user/mailrail.timer [outside pwd]")
+
+      result.should be_true
+      out_str = output.to_s
+      out_str.should contain("MUTATION OUTSIDE PWD (WORKING DIRECTORY)")
+      out_str.should contain("Approve create new file ~/.config/systemd/user/mailrail.timer [outside pwd]? [y/N/a]: ")
+    end
+
     it "colorizes diff output when colorize is enabled" do
       input = IO::Memory.new("n\n")
       output = IO::Memory.new

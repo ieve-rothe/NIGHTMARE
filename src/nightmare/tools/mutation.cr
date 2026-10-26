@@ -22,6 +22,7 @@ module Nightmare::Tools
     def write_file(path : String, content : String) : String
       full_path = @guard.resolve_write(path)
       display_path = format_display_path(full_path)
+      outside_pwd = !@guard.env.inside_root?(full_path)
 
       if File.exists?(full_path)
         # Existing file: requires unified diff and approval modal
@@ -33,15 +34,27 @@ module Nightmare::Tools
           return "File #{display_path} is already up to date (no changes)."
         end
 
-        unless approve_mutation?(diff_text, "overwrite #{display_path}")
+        desc = outside_pwd ? "overwrite #{display_path} [outside pwd]" : "overwrite #{display_path}"
+        unless approve_mutation?(diff_text, desc)
           return "[Execution rejected by user]"
         end
       else
-        # New file creation: auto-approved per R3 / §4.1
+        if outside_pwd
+          # New file outside pwd: requires approval per user requirement
+          diff_text = Diff.unified_diff("", content, display_path)
+          desc = "create new file #{display_path} [outside pwd]"
+          unless approve_mutation?(diff_text, desc)
+            return "[Execution rejected by user]"
+          end
+        end
+        # New file creation inside pwd: auto-approved per R3 / §4.1
         Dir.mkdir_p(File.dirname(full_path))
       end
 
       File.write(full_path, content)
+      if outside_pwd
+        @guard.env.add_session_writable_directory(File.dirname(full_path))
+      end
       record_side_effect(display_path)
 
       "Successfully wrote #{content.bytesize} bytes to #{display_path}"
@@ -160,11 +173,16 @@ module Nightmare::Tools
       updated = original.sub(active_target, active_replacement)
       diff_text = Diff.unified_diff(original, updated, display_path)
 
-      unless approve_mutation?(diff_text, "overwrite #{display_path} (replace target)")
+      outside_pwd = !@guard.env.inside_root?(full_path)
+      desc = outside_pwd ? "overwrite #{display_path} (replace target) [outside pwd]" : "overwrite #{display_path} (replace target)"
+      unless approve_mutation?(diff_text, desc)
         return "[Execution rejected by user]"
       end
 
       File.write(full_path, updated)
+      if outside_pwd
+        @guard.env.add_session_writable_directory(File.dirname(full_path))
+      end
       record_side_effect(display_path)
 
       "Successfully replaced content in #{display_path}"
@@ -174,22 +192,34 @@ module Nightmare::Tools
     def append_to_file(path : String, content : String) : String
       full_path = @guard.resolve_write(path)
       display_path = format_display_path(full_path)
+      outside_pwd = !@guard.env.inside_root?(full_path)
 
       if File.exists?(full_path)
         original = File.read(full_path)
         updated = original.ends_with?('\n') ? "#{original}#{content}" : "#{original}\n#{content}"
         diff_text = Diff.unified_diff(original, updated, display_path)
 
-        unless approve_mutation?(diff_text, "append to #{display_path}")
+        desc = outside_pwd ? "append to #{display_path} [outside pwd]" : "append to #{display_path}"
+        unless approve_mutation?(diff_text, desc)
           return "[Execution rejected by user]"
         end
 
         File.write(full_path, updated)
       else
+        if outside_pwd
+          diff_text = Diff.unified_diff("", content, display_path)
+          desc = "create new file #{display_path} [outside pwd]"
+          unless approve_mutation?(diff_text, desc)
+            return "[Execution rejected by user]"
+          end
+        end
         Dir.mkdir_p(File.dirname(full_path))
         File.write(full_path, content)
       end
 
+      if outside_pwd
+        @guard.env.add_session_writable_directory(File.dirname(full_path))
+      end
       record_side_effect(display_path)
       "Successfully appended #{content.bytesize} bytes to #{display_path}"
     end
@@ -198,7 +228,14 @@ module Nightmare::Tools
       if @guard.env.inside_root?(full_path)
         Path.new(full_path).relative_to(@guard.root).to_s
       else
-        full_path
+        home = Path.home.to_s
+        if full_path == home
+          "~"
+        elsif full_path.starts_with?(home + "/")
+          "~/" + full_path[(home.size + 1)..]
+        else
+          full_path
+        end
       end
     end
 

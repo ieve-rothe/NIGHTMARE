@@ -309,7 +309,7 @@ describe "Nightmare Tools Suite & Security Boundaries" do
         result.should contain("matches bulk data/log pattern")
 
         # Exceeding bulk_data_max_lines should also be refused
-        result_excessive = tools.read_file("events.jsonl", limit: 100)
+        result_excessive = tools.read_file("events.jsonl", limit: env.settings.bulk_data_max_lines + 10)
         result_excessive.should contain("[Refused:")
         result_excessive.should contain("matches bulk data/log pattern")
 
@@ -476,12 +476,72 @@ describe "Nightmare Tools Suite & Security Boundaries" do
           res3.should contain("Successfully replaced")
           File.read(target_file).should eq("Initial line\nSecond line\n")
 
-          # 4. write_file to an unconfigured external directory is rejected
+          # 4. write_file to an external directory without approval is rejected
           with_temp_dir do |unauthorized_dir|
-            expect_raises(Nightmare::SecurityError, /Path traversal violation/) do
-              mutation.write_file(File.join(unauthorized_dir, "hack.txt"), "bad")
+            reject_handler = ->(_diff : String, _desc : String) { false }
+            reject_mutation = Nightmare::Tools::Mutation.new(guard, reject_handler)
+            res = reject_mutation.write_file(File.join(unauthorized_dir, "hack.txt"), "bad")
+            res.should eq("[Execution rejected by user]")
+            File.exists?(File.join(unauthorized_dir, "hack.txt")).should be_false
+          end
+
+          # 5. write_file to sensitive or protected external paths raises SecurityError
+          with_temp_dir do |unauthorized_dir|
+            expect_raises(Nightmare::SecurityError, /is a sensitive path/) do
+              mutation.write_file(File.join(unauthorized_dir, ".env"), "bad")
+            end
+            expect_raises(Nightmare::SecurityError, /is a protected path/) do
+              mutation.write_file(File.join(unauthorized_dir, ".git", "config"), "bad")
             end
           end
+        end
+      end
+    end
+
+    it "elevates mutations outside pwd to approval and auto-approves new files inside pwd (TKT-037)" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+          guard = Nightmare::Tools::Guard.new(env)
+          prompts = [] of String
+          handler = ->(_diff : String, desc : String) {
+            prompts << desc
+            true
+          }
+          mutation = Nightmare::Tools::Mutation.new(guard, handler)
+
+          # 1. New file inside pwd is auto-approved without prompting handler
+          res_in = mutation.write_file("internal.txt", "content inside pwd")
+          res_in.should contain("Successfully wrote")
+          prompts.size.should eq(0)
+          File.read(File.join(root, "internal.txt")).should eq("content inside pwd")
+
+          # 2. New file outside pwd prompts handler with [outside pwd]
+          ext_target = File.join(ext_dir, "service.conf")
+          res_out = mutation.write_file(ext_target, "service config")
+          res_out.should contain("Successfully wrote")
+          prompts.size.should eq(1)
+          prompts.last.should contain("[outside pwd]")
+          prompts.last.should contain("create new file")
+          File.read(ext_target).should eq("service config")
+
+          # 3. Existing file outside pwd prompts handler with [outside pwd]
+          res_edit = mutation.write_file(ext_target, "service config v2")
+          res_edit.should contain("Successfully wrote")
+          prompts.size.should eq(2)
+          prompts.last.should contain("[outside pwd]")
+          prompts.last.should contain("overwrite")
+          File.read(ext_target).should eq("service config v2")
+
+          # 4. Appending to external file prompts handler with [outside pwd]
+          res_append = mutation.append_to_file(ext_target, "\nnew line")
+          res_append.should contain("Successfully appended")
+          prompts.size.should eq(3)
+          prompts.last.should contain("[outside pwd]")
+          prompts.last.should contain("append to")
+
+          # 5. Workspace root has no ~ directory created
+          File.exists?(File.join(root, "~")).should be_false
         end
       end
     end

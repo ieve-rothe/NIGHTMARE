@@ -390,6 +390,42 @@ describe Nightmare::Workspace do
     end
   end
 
+  describe "tilde path expansion (TKT-037)" do
+    it "resolves ~ and ~/ paths relative to Path.home in resolve_contained_path" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        home = Path.home.to_s
+
+        env.resolve_contained_path("~").should eq(home)
+        env.resolve_contained_path("~/").should eq(home)
+        env.resolve_contained_path("~/.config").should eq(File.join(home, ".config"))
+        env.resolve_contained_path("~/.config/systemd/user/mailrail.timer").should eq(File.join(home, ".config", "systemd", "user", "mailrail.timer"))
+
+        # Relative paths inside root
+        env.resolve_contained_path("foo/bar.txt").should eq(File.join(root, "foo", "bar.txt"))
+        env.resolve_contained_path("./foo/bar.txt").should eq(File.join(root, "foo", "bar.txt"))
+
+        # Absolute paths
+        env.resolve_contained_path("/tmp/absolute.txt").should eq("/tmp/absolute.txt")
+      end
+    end
+
+    it "dynamically adds external approved directories via add_session_writable_directory" do
+      with_temp_dir do |root|
+        with_temp_dir do |ext_dir|
+          env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+          env.inside_writable?(File.join(ext_dir, "test.txt")).should be_false
+
+          env.add_session_writable_directory(ext_dir)
+
+          env.inside_writable?(File.join(ext_dir, "test.txt")).should be_true
+          env.inside_readable?(File.join(ext_dir, "test.txt")).should be_true
+          env.sanitize_write_path(File.join(ext_dir, "test.txt")).should eq(File.join(ext_dir, "test.txt"))
+        end
+      end
+    end
+  end
+
   describe Nightmare::Workspace::AuditLog do
     it "appends entries and rotates automatically at threshold with 3 history files" do
       with_temp_dir do |dir|

@@ -147,13 +147,7 @@ module Nightmare::Workspace
       raw_dirs.each do |dir|
         trimmed = dir.strip
         next if trimmed.empty?
-        expanded = if trimmed.starts_with?("~")
-          trimmed == "~" ? home : File.join(home, trimmed[1..].lstrip('/'))
-        elsif Path.new(trimmed).absolute?
-          File.expand_path(trimmed)
-        else
-          File.expand_path(trimmed, @root)
-        end
+        expanded = Path.new(trimmed).expand(base: @root, home: true).to_s
 
         begin
           if File.exists?(expanded)
@@ -171,13 +165,7 @@ module Nightmare::Workspace
       raw_w_dirs.each do |dir|
         trimmed = dir.strip
         next if trimmed.empty?
-        expanded = if trimmed.starts_with?("~")
-          trimmed == "~" ? home : File.join(home, trimmed[1..].lstrip('/'))
-        elsif Path.new(trimmed).absolute?
-          File.expand_path(trimmed)
-        else
-          File.expand_path(trimmed, @root)
-        end
+        expanded = Path.new(trimmed).expand(base: @root, home: true).to_s
 
         begin
           if File.exists?(expanded)
@@ -263,6 +251,15 @@ module Nightmare::Workspace
       false
     end
 
+    def readonly_directory?(resolved_path : String) : Bool
+      return false if path_inside_root?(resolved_path)
+      return false if path_inside_writable?(resolved_path)
+      @readable_directories.any? do |dir|
+        prefix = dir.ends_with?('/') ? dir : "#{dir}/"
+        resolved_path == dir || resolved_path.starts_with?(prefix)
+      end
+    end
+
     def sanitize_path(path : String) : String
       resolved = resolve_contained_path(path)
       unless path_inside_root?(resolved)
@@ -279,12 +276,22 @@ module Nightmare::Workspace
       resolved
     end
 
-    def sanitize_write_path(path : String) : String
+    def sanitize_write_path(path : String, allow_external : Bool = false) : String
       resolved = resolve_contained_path(path)
-      unless path_inside_writable?(resolved)
+      unless allow_external || path_inside_writable?(resolved)
         raise SecurityError.new("Path traversal violation: target \"#{path}\" resolves to \"#{resolved}\" outside root \"#{@root}\" and configured writable directories")
       end
       resolved
+    end
+
+    def add_session_writable_directory(dir : String) : Nil
+      canonical = begin
+        File.realpath(dir)
+      rescue
+        dir
+      end
+      @writable_directories << canonical unless @writable_directories.includes?(canonical)
+      @readable_directories << canonical unless @readable_directories.includes?(canonical)
     end
 
     def git_path?(path : String) : Bool
@@ -344,12 +351,8 @@ module Nightmare::Workspace
       ([top] + rows + [bot]).join("\n")
     end
 
-    private def resolve_contained_path(path : String) : String
-      expanded = if Path.new(path).absolute?
-        File.expand_path(path)
-      else
-        File.expand_path(path, @root)
-      end
+    def resolve_contained_path(path : String) : String
+      expanded = Path.new(path).expand(base: @root, home: true).to_s
 
       curr = expanded
       remaining = [] of String

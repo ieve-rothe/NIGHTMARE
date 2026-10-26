@@ -105,12 +105,21 @@ module Nightmare::UI
     # Renders interactive unified diff modal and prompts for line-mode approval
     def approve_diff(diff : String, description : String) : Bool
       flush_input
+      outside_pwd = description.includes?("[outside pwd]") || description.includes?("outside pwd")
+      if outside_pwd
+        @output.puts "\n⚠️  MUTATION OUTSIDE PWD (WORKING DIRECTORY)".colorize(:yellow).mode(:bold)
+      end
       @output.puts "\n--- Diff ---".colorize(:cyan).mode(:bold)
       @output.puts Tools::Diff.colorize(diff)
       @output.puts "------------".colorize(:cyan).mode(:bold)
 
       loop do
-        @output.print "Approve #{description}? [y/N/a]: "
+        prompt_text = if outside_pwd
+          "Approve #{description}? [y/N/a]: ".colorize(:yellow).mode(:bold).to_s
+        else
+          "Approve #{description}? [y/N/a]: "
+        end
+        @output.print prompt_text
         @output.flush
 
         raw = gets_interactive

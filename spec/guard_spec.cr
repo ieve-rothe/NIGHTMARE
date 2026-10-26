@@ -186,6 +186,33 @@ describe Nightmare::Tools::Guard do
         expect_raises(SecurityError, /sensitive file/) { guard.resolve_read("id_rsa") }
       end
     end
+
+    it "blocks reading and writing sensitive patterns in home directory paths (TKT-037)" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+
+        # Sensitive paths in ~ are blocked for read
+        expect_raises(SecurityError, /sensitive file/) { guard.resolve_read("~/.ssh/id_rsa") }
+        expect_raises(SecurityError, /sensitive file/) { guard.resolve_read("~/.ssh/authorized_keys") }
+        expect_raises(SecurityError, /sensitive file/) { guard.resolve_read("~/.gnupg/secring.gpg") }
+        expect_raises(SecurityError, /sensitive file/) { guard.resolve_read("~/.env") }
+
+        # Sensitive paths in ~ are blocked for write
+        expect_raises(SecurityError, /sensitive path/) { guard.resolve_write("~/.ssh/id_rsa") }
+        expect_raises(SecurityError, /sensitive path/) { guard.resolve_write("~/.ssh/authorized_keys") }
+        expect_raises(SecurityError, /sensitive path/) { guard.resolve_write("~/.gnupg/secring.gpg") }
+        expect_raises(SecurityError, /sensitive path/) { guard.resolve_write("~/.env") }
+
+        # Protected paths (.git, .nightmare) in ~ are blocked for write
+        expect_raises(SecurityError, /is a protected path/) { guard.resolve_write("~/.git/config") }
+        expect_raises(SecurityError, /is a protected path/) { guard.resolve_write("~/.nightmare/prompt.md") }
+
+        # Non-sensitive home path resolves successfully (elevated to approval in Mutation)
+        resolved = guard.resolve_write("~/.config/testapp/config.ini")
+        resolved.should eq(File.join(Path.home.to_s, ".config", "testapp", "config.ini"))
+      end
+    end
   end
 
   describe "tool boundary output capping" do

@@ -84,7 +84,7 @@ module Nightmare::SystemPrompt
     def self.resolve_with_source(env : Workspace::Environment, cli_override : String? = nil) : ResolutionResult
       # Tier 1: CLI Flag
       if cli_override && !cli_override.strip.empty?
-        resolved_path = File.expand_path(cli_override, env.root)
+        resolved_path = Path.new(cli_override).expand(base: env.root, home: true).to_s
         unless File.file?(resolved_path)
           raise ArgumentError.new("System prompt file not found: #{cli_override} (resolved to #{resolved_path})")
         end

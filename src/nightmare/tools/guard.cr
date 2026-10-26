@@ -41,6 +41,11 @@ module Nightmare::Tools
     # Enforces containment within @root or configured readable_directories and guards against sensitive patterns.
     # Raises SecurityError on traversal or sensitive file access.
     def resolve_read(path : String) : String
+      contained = @env.resolve_contained_path(path)
+      if sensitive_path?(path) || sensitive_path?(contained) || protected_path?(path) || protected_path?(contained)
+        raise SecurityError.new("Access denied: reading sensitive file or pattern is prohibited: #{path}")
+      end
+
       full = @env.sanitize_read_path(path)
       rel = if @env.inside_root?(full)
         Path.new(full).relative_to(@env.root).to_s
@@ -56,24 +61,45 @@ module Nightmare::Tools
         end
       end
 
-      if sensitive_read?(rel) || sensitive_read?(File.basename(full)) || protected_path?(rel)
+      if sensitive_path?(rel) || sensitive_path?(File.basename(full)) || protected_path?(rel)
         raise SecurityError.new("Access denied: reading sensitive file or pattern is prohibited: #{path}")
       end
 
       full
     end
 
-    # Checks if a relative path matches sensitive read patterns.
+    # Checks if a relative or absolute path matches sensitive read patterns.
     def sensitive_read?(rel_path : String) : Bool
-      @sandbox.sensitive_path?(rel_path)
+      sensitive_path?(rel_path)
+    end
+
+    # Checks if any path segment or basename matches sensitive patterns (.ssh, .gnupg, credentials, etc.)
+    def sensitive_path?(path : String) : Bool
+      return true if @sandbox.sensitive_path?(path)
+      parts = path.split('/')
+      parts.any? { |p| p == ".ssh" || p == ".gnupg" || @sandbox.sensitive_path?(p) }
     end
 
     # Resolves a path for writing / mutation.
-    # Enforces containment within @root or configured writable_directories, checks files_targeted if configured,
-    # and unconditionally blocks protected paths.
-    # Raises SecurityError on traversal or target mismatch.
+    # Enforces non-sensitive and non-protected boundaries. If outside @root, mutation is elevated
+    # to user approval in Mutation tools.
+    # Raises SecurityError on protected path, sensitive patterns, readonly directory, or target mismatch.
     def resolve_write(path : String) : String
-      full = @env.sanitize_write_path(path)
+      contained = @env.resolve_contained_path(path)
+
+      if protected_path?(path) || protected_path?(contained) || protected_path?(File.basename(contained))
+        raise SecurityError.new("[Refused: #{path} is a protected path]")
+      end
+
+      if sensitive_path?(path) || sensitive_path?(contained) || sensitive_path?(File.basename(contained))
+        raise SecurityError.new("[Refused: #{path} is a sensitive path]")
+      end
+
+      if @env.readonly_directory?(contained)
+        raise SecurityError.new("Path traversal violation: target \"#{path}\" resolves to \"#{contained}\" within read-only directory")
+      end
+
+      full = contained
       rel = if @env.inside_root?(full)
         Path.new(full).relative_to(@env.root).to_s
       else
@@ -86,10 +112,6 @@ module Nightmare::Tools
         else
           full
         end
-      end
-
-      if protected_path?(rel) || protected_path?(File.basename(full))
-        raise SecurityError.new("[Refused: #{path} is a protected path]")
       end
 
       if targets = @files_targeted

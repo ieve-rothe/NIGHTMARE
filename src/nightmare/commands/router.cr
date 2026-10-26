@@ -884,7 +884,7 @@ USAGE
         return
       end
 
-      full_path = File.expand_path(path, @env.root)
+      full_path = Path.new(path).expand(base: @env.root, home: true).to_s
       unless File.exists?(full_path)
         puts "Error: Plan file not found at #{full_path}"
         return
@@ -1069,7 +1069,7 @@ USAGE
         return
       end
 
-      full_path = File.expand_path(path, @env.root)
+      full_path = Path.new(path).expand(base: @env.root, home: true).to_s
       unless File.exists?(full_path)
         puts "Error: Plan file not found at #{full_path}"
         return
