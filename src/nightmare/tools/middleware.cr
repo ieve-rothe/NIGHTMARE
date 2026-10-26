@@ -49,7 +49,11 @@ module ToolMiddleware
     ) : String
       res = next_handler.call(args)
       if p = @presenter
-        p.present_tool_result(tool_name, args, res)
+        begin
+          p.present_tool_result(tool_name, args, res)
+        rescue ex
+          # UI presentation must never crash tool execution or interrupt the agent step loop
+        end
       end
       res
     end

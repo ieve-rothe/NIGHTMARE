@@ -405,5 +405,88 @@ describe "Nightmare Harness & Step Runner" do
       executed.should be_true
       outcome.value.should eq("Command ran via alias")
     end
+
+    it "preserves assistant tool call and records failure notice in transcript when step execution fails" do
+      with_temp_dir do |dir|
+        transcript = Nightmare::Transcript.new(dir)
+        store = Nightmare::Context::SlidingStore.new
+        calibrator = Nightmare::Context::TokenEstimator.new
+        tool_loop = Nightmare::Harness::ToolLoop.new(store, calibrator)
+
+        call_fail = Mantle::Clients::ToolCall.new(
+          id: "call_err",
+          function: Mantle::Clients::ToolCallFunction.new(name: "failing_tool", arguments: "{}")
+        )
+
+        client = FakeClient.new([
+          Mantle::Clients::Response.new(content: "I will call failing tool", tool_calls: [call_fail]),
+        ])
+
+        tool = Mantle::Tools::Tool.new(
+          function: Mantle::Tools::FunctionDefinition.new(
+            name: "failing_tool",
+            description: "Fails",
+            parameters: Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+          )
+        ) do |_|
+          raise "Boom! Tool failed"
+        end
+
+        runner = Nightmare::Harness::StepRunner.new(
+          client: client,
+          tools: [tool],
+          tool_loop: tool_loop,
+          transcript: transcript
+        )
+
+        store.start_turn("Trigger failing tool")
+        outcome = runner.run_turn(store)
+
+        outcome.ok?.should be_false
+        outcome.error.not_nil!.message.should contain("Boom! Tool failed")
+
+        # Check transcript recorded user, assistant with tool call, and failure notice
+        transcript.entries.size.should be >= 3
+        transcript.entries[0].role.should eq("user")
+        transcript.entries[0].content.should eq("Trigger failing tool")
+
+        transcript.entries[1].role.should eq("assistant")
+        transcript.entries[1].content.should eq("I will call failing tool")
+        transcript.entries[1].tool_calls.not_nil!.first.id.should eq("call_err")
+
+        transcript.entries.last.role.should eq("system")
+        transcript.entries.last.content.not_nil!.should contain("*(Turn failed:")
+        transcript.entries.last.content.not_nil!.should contain("Boom! Tool failed")
+
+        disk_file = File.join(dir, "transcript.md")
+        File.exists?(disk_file).should be_true
+        disk_content = File.read(disk_file)
+        disk_content.should contain("Trigger failing tool")
+        disk_content.should contain("failing_tool")
+        disk_content.should contain("*(Turn failed:")
+      end
+    end
+
+    it "isolates presentation rendering exceptions in ToolMiddleware::Presentation without failing execution" do
+      executed = false
+      tool = Mantle::Tools::Tool.new(
+        function: Mantle::Tools::FunctionDefinition.new(
+          name: "dummy_tool",
+          description: "Runs fine",
+          parameters: Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+        )
+      ) do |_|
+        executed = true
+        "tool ran successfully"
+      end
+
+      broken_calibrator = Nightmare::Context::TokenEstimator.new
+      broken_presenter = Nightmare::UI::TurnPresenter.new(broken_calibrator)
+      wrapped_tools = ToolMiddleware.wrap_all([tool], [ToolMiddleware::Presentation.new(broken_presenter)] of ToolMiddleware::Base)
+
+      res = wrapped_tools.first.execute({} of String => JSON::Any)
+      res.should eq("tool ran successfully")
+      executed.should be_true
+    end
   end
 end

@@ -293,6 +293,31 @@ module Nightmare::Harness
           "Mantle step error: #{result.error}"
         end
 
+        # Preserve transcript visibility for failed turn
+        if tr = @transcript
+          recorded_assistant = false
+          if active = store.active_turn
+            if active.messages.size > 1
+              active.messages[1..].each do |m|
+                tr.record(m)
+                recorded_assistant = true if m.role == "assistant"
+              end
+            end
+          end
+
+          unless recorded_assistant
+            if raw = result.raw_response
+              c = raw.content
+              tc = raw.tool_calls
+              if c || tc
+                tr.record(Mantle::Message.new("assistant", c, tool_calls: tc))
+              end
+            end
+          end
+
+          tr.record(Mantle::Message.new("system", "*(Turn failed: #{msg})*"))
+        end
+
         TurnOutcome.failure(
           error: StepError.new(error_kind, msg, retryable: retryable),
           thinking: result.thinking,
