@@ -46,6 +46,6 @@ bin/nightmare --no-logs
 ## Core Tenets
 
 1. **Zero Repository Litter** — Config, logs, and caches live in XDG directories, never in your project tree.
-2. **Strict Workspace Containment** — All operations confined to workspace root. Path traversal and `.git/` writes are blocked.
+2. **Controlled Workspace Boundaries** — Workspace-anchored execution with strict path defenses. Reads and new files inside cwd operate autonomously, external mutations require interactive approval with visual warnings, and sensitive files (`.ssh`, `.env`, `.git`) are strictly protected.
 3. **Anti-Fatigue Approval Boundary** — Reads are autonomous. Mutations show diffs. Shell commands prompt for approval.
 4. **Deterministic Execution Harness** — Typed outcomes, loop detection, self-healing retries, and context overflow recovery.

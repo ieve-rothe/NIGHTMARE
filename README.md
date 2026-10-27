@@ -15,8 +15,11 @@ Agent execution security:
 * This is meant to be a 'human in the loop' harness for prototyping workflows and giving a bot (especially with an orchestrator farming work out) the leeway to go off on a long-running task, but ... they're on a leash. (They don't know about the leash... don't tell em plz)
 * SO ...
   * Within-cwd, file/directory reads, grep search, web search, and creation of new files is allowed without human approval
-  * A few sensitive directory / file types are guarded and can never be read by the agent (eg .git/*, .env*)
-  * File writes (other than new) require diff approval
+  * Within-cwd file modifications (overwrites, edits, appends) require interactive diff approval
+  * Outside-cwd mutations (including creating new files in `~/.config`, dotfiles, or external dirs) require explicit diff approval and display a prominent warning banner (`⚠️  MUTATION OUTSIDE PWD`)
+  * Approved external mutations dynamically grant session containment for subsequent operations
+  * Canonical tilde (`~` / `~/...`) expansion resolves paths relative to `$HOME`
+  * Sensitive files and directories are strictly guarded and can never be read or written by the agent (e.g. `.ssh`, `.gnupg`, `id_rsa`, `.env*`, `.git/*`, `.nightmare/*`)
   * Subagent delegation is allowed without human approval
   * Shell commands are all prompt-guarded by default, but there is an allowlisting option in the guard prompt
 

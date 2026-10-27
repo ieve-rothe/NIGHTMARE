@@ -333,19 +333,20 @@ It is a **class**, not a struct: `env.manifest.touch` on a struct mutates a copy
 
 ### 4.1 `Tools::Guard` — containment and caps
 
-1. **Nonexistent targets resolve through their nearest existing ancestor.** `File.realpath` fails on a nonexistent path, so `write_file` for a new file walks up to the nearest existing ancestor, `realpath`s that, and re-joins the remaining components (`Environment#resolve_contained_path`).
-2. **Prefix check is `root + "/"`, not `root`** — `starts_with?(@root)` accepts `/home/x/proj-evil` for root `/home/x/proj`. `Environment#path_inside_root?` compares against `"#{@root}/"` and separately allows exact equality with `@root`.
-3. **Protected paths — mutation tools refuse unconditionally.** Checked on workspace-relative paths after resolution:
+1. **Nonexistent targets and tilde paths expand canonically.** `Path.new(path).expand(base: @root, home: true)` expands `~` and `~/...` to `$HOME`, while nonexistent targets resolve through their nearest existing ancestor (`Environment#resolve_contained_path`).
+2. **Prefix check and external containment.** `path_inside_root?` verifies against `"#{@root}/"` or exact `@root`. Paths outside `@root` (such as `~/.config/...`) are checked for sensitive patterns and read-only flags; non-sensitive external targets are elevated to interactive approval and dynamically registered to session containment (`Environment#add_session_writable_directory`).
+3. **Protected paths — mutation tools refuse unconditionally.** Checked on canonical paths after resolution:
 
    | Pattern | Rationale |
    | :--- | :--- |
-   | `.git` and `.git/**` | R3 requirement; repository integrity |
+   | `.git` and `.git/**` | Repository integrity |
    | `.nightmare/**` | Tier-2 system prompt source; prompt-injection persistence |
    | `.nightmare*` (any sibling) | Reserved namespace |
 
    Violations return a tool failure (`[Refused: <path> is a protected path]`), never an approval modal. They are not approvable.
-4. **Sensitive-read patterns** for `read_file`, `search`, `list_files`: `.env*`, `*.pem`, `id_rsa*`, `*secret*`, `*credential*`, `.git/*`.
-5. **Output caps at the tool boundary.** Every tool returns at most `TOOL_OUTPUT_MAX_BYTES` (§7). A capped result ends with `[... truncated at N bytes; call read_file with offset=X limit=Y for more]`.
+4. **Sensitive paths — reads and writes refuse unconditionally.** Checked before file operations: `.env*`, `*.pem`, `id_rsa*`, `*secret*`, `*credential*`, `.git/*`, `.ssh/*`, `.gnupg/*`.
+5. **Configured read-only directories.** Directories specified via `--read-dir` / `readable_directories` allow read access but unconditionally refuse writes (`Environment#readonly_directory?`).
+6. **Output caps at the tool boundary.** Every tool returns at most `TOOL_OUTPUT_MAX_BYTES` (§7). A capped result ends with `[... truncated at N bytes; call read_file with offset=X limit=Y for more]`.
 
 ### 4.2 `Tools::Shell` — argv execution
 
@@ -494,11 +495,21 @@ Ownership: `Mantle::Step` owns `working_messages` during the loop; `turn.message
 ```text
 Tool Invocation: run_command or a mutation tool
    │
-   ├── Tools::Guard: outside @root? protected path? ──> REFUSE (no modal, not approvable)
+   ├── Tools::Guard:
+   │      ├── Sensitive path (.ssh, .gnupg, keys, .env)? ──> REFUSE (SecurityError)
+   │      ├── Protected path (.git, .nightmare)? ──> REFUSE (protected path)
+   │      └── Configured read-only directory? ──> REFUSE (readonly violation)
    │
-   ├── Mutation on Existing File?
-   │      └── Generate unified diff in RAM
-   │          Render diff modal; read line-mode input: y / [N] / a
+   ├── File Mutation Tool (write_file, replace_in_file, append_to_file)?
+   │      ├── Inside PWD and New File?
+   │      │      └── Auto-Approve & Write
+   │      ├── Inside PWD and Existing File?
+   │      │      └── Generate unified diff in RAM
+   │      │          Render diff modal; read line-mode input: y / [N] / a
+   │      └── Outside PWD (New or Existing File)?
+   │             └── Generate unified diff preview
+   │                 Render diff modal with ⚠️ OUTSIDE PWD warning banner (y / [N] / a)
+   │                 On approval: dynamically register dir to session containment
    │
    └── Shell Execution (run_command)?
           │

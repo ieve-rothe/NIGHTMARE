@@ -87,7 +87,10 @@ Returns metadata (size, permissions, modification time) for a file or directory.
 
 ## 2. Mutation Tools
 
-Mutation tools modify files. Changes to existing files require interactive diff approval. New file creation is auto-approved.
+Mutation tools modify files with strict boundaries based on the working directory (`pwd`):
+- **Within `pwd`**: Creation of new files is auto-approved without prompting. Modifications to existing files (overwriting, editing, appending) require interactive diff approval.
+- **Outside `pwd`**: Any mutation (including creating new files in `~/.config` or external directories) is elevated to interactive user approval with a unified diff preview and displays a prominent warning banner (`⚠️  MUTATION OUTSIDE PWD`). Once approved, the target directory is dynamically added to the session's writable and readable directories.
+- **Sensitive & Protected Paths**: Operations targeting sensitive files (`.ssh`, `.gnupg`, `id_rsa`, `.env*`, keys) or repository metadata (`.git`, `.nightmare`) are strictly refused regardless of location.
 
 ### `write_file`
 Creates a new file or overwrites an existing file entirely.

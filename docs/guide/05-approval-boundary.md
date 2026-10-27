@@ -4,16 +4,29 @@ Nightmare maximizes agent autonomy on read operations while enforcing explicit u
 
 ## File Mutation Approval
 
-New file creations are automatically approved to accelerate bootstrapping. Existing file modifications present an interactive unified diff for review before writing.
+Nightmare distinguishes file mutations based on working directory containment (`pwd`):
+- **Inside `pwd`**: Creating new files is automatically approved to accelerate bootstrapping. Modifying existing files presents an interactive unified diff for review before writing.
+- **Outside `pwd`**: All mutations (both new files and existing modifications, such as writing to `~/.config/...` or sibling repositories) require interactive user approval. New files present a unified diff against an empty file, and the approval modal displays a prominent colored warning banner:
+  ```text
+  ⚠️  MUTATION OUTSIDE PWD (WORKING DIRECTORY)
+  ```
+- **Dynamic Containment**: Approving an external mutation automatically registers the parent directory into the session's writable and readable directories, allowing subsequent operations within that directory during the active session.
 
 ```mermaid
 graph TD
-    A[File Mutation Requested] --> B{File Exists?}
-    B -->|No| C[Auto-Approve Creation]
-    B -->|Yes| D[Render Unified Diff]
-    D --> E{User Input}
-    E -->|y / a| F[Write Changes]
-    E -->|N| G[Reject Execution]
+    A[File Mutation Requested] --> B{Inside PWD?}
+    B -->|Yes| C{File Exists?}
+    C -->|No| D[Auto-Approve Creation]
+    C -->|Yes| E[Render Unified Diff Modal]
+    B -->|No| F["Render Diff Modal with ⚠️ Outside PWD Warning"]
+    E --> G{User Input}
+    F --> G
+    G -->|y / a| H[Apply Mutation]
+    H --> I{Outside PWD?}
+    I -->|Yes| J[Add Directory to Session Containment]
+    I -->|No| K[Done]
+    J --> K
+    G -->|N / Enter| L[Reject Execution]
 ```
 
 ```crystal
@@ -108,37 +121,41 @@ Specific flags that execute code or manipulate configurations are permanently de
 
 ## Security Guard and Path Resolution
 
-`Nightmare::Tools::Guard` ensures all read and write operations stay within the workspace boundary. It actively prevents path traversal and blocks access to sensitive system or repository files.
+`Nightmare::Tools::Guard` and `Nightmare::Workspace::Environment` mediate all read and write operations. Path resolution canonically expands home directories (`~` and `~/...`), strictly blocks access to sensitive credentials and protected repository metadata, and routes external mutations to user approval.
 
 ```mermaid
-graph LR
-    A[Resolve Path] --> B{Path Traversal?}
-    B -->|Yes| C[Raise SecurityError]
-    B -->|No| D{Sensitive Read?}
-    D -->|Yes| C
-    D -->|No| E{Protected Write?}
-    E -->|Yes| C
-    E -->|No| F[Return Absolute Path]
+graph TD
+    A[Resolve Target Path] --> B["Expand Base & Tilde: Path#expand"]
+    B --> C{"Sensitive Path? (.ssh, .gnupg, keys, .env)"}
+    C -->|Yes| D[Raise SecurityError: Access denied]
+    C -->|No| E{"Protected Path? (.git, .nightmare)"}
+    E -->|Yes| D
+    E -->|No| F{Operation Type}
+    F -->|Read| G{Inside Root or Configured Readable Dir?}
+    G -->|Yes| H[Permit Read]
+    G -->|No| D
+    F -->|Write| I{Configured Read-Only Dir?}
+    I -->|Yes| D
+    I -->|No| J{Inside Root or Session Writable?}
+    J -->|Yes| K[Standard Mutation Flow]
+    J -->|No| L[Elevate to External Mutation Approval]
 ```
 
 ```crystal
 guard = Nightmare::Tools::Guard.new(env)
-safe_path = guard.resolve_write("src/main.cr")
+safe_path = guard.resolve_write("~/.config/systemd/user/mailrail.timer")
 ```
 
-### Sensitive Reads
+### Canonical Tilde Expansion
 
-The system blocks read access to patterns matching `.env*`, `*.pem`, `id_rsa*`, `*secret*`, `*credential*`, and `.git`.
+Paths beginning with `~` or `~/` are expanded relative to the operator's home directory (`$HOME`). This ensures that tools, plan runners (`/plan run`), and CLI flags (`--system-prompt`) resolve paths canonically, preventing agents from accidentally creating `<pwd>/~` workspace directories when configuring user services or dotfiles.
 
-### Protected Writes
+### Sensitive Paths & Repository Integrity
 
-Writes to `.git` and `.nightmare` directories are unconditionally prohibited. This protects repository integrity and agent configuration.
-
-```bash
-# Agent attempt to modify git history
-nightmare write .git/HEAD "ref: refs/heads/pwned"
-# [Refused: .git/HEAD is a protected path]
-```
+Access to sensitive patterns and protected metadata is unconditionally denied on both read and write:
+- **Sensitive Paths**: Patterns matching `.ssh`, `.gnupg`, `id_rsa*`, `*.pem`, `.env*`, and credential patterns raise `SecurityError`.
+- **Protected Paths**: `.git`, `.nightmare` (and any dot-nightmare sibling files) are permanently prohibited from write operations.
+- **Read-Only Directories**: Directories configured via `--read-dir` / `readable_directories` remain strictly read-only.
 
 ---
 - Previous: [Tools](04-tools.md)
