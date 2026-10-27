@@ -34,7 +34,7 @@ module Nightmare
   VERSION = "0.7.0"
 
   module CLI
-    struct Options
+    class Options
       property system_prompt_path : String? = nil
       property no_log : Bool = false
       property model : String? = nil
@@ -48,11 +48,9 @@ module Nightmare
     end
 
     class Parser
-      def self.parse(args : Array(String) = ARGV) : Options
-        options = Options.new
-
-        parser = OptionParser.new do |opts|
-          opts.banner = "Usage: nightmare [options] [workspace_path]"
+      def self.build(options : Options = Options.new) : OptionParser
+        OptionParser.new do |opts|
+          opts.banner = "NIGHTMARE - Developer REPL\nUsage: nightmare [options] [workspace_path]"
 
           opts.on("-s PATH", "--system=PATH", "Path to custom system prompt file (overrides all defaults)") do |path|
             options.system_prompt_path = path
@@ -100,6 +98,11 @@ module Nightmare
             end
           end
         end
+      end
+
+      def self.parse(args : Array(String) = ARGV) : Options
+        options = Options.new
+        parser = build(options)
 
         begin
           parser.parse(args)
@@ -111,41 +114,33 @@ module Nightmare
       end
 
       def self.help_text : String
-        String.build do |io|
-          opts = OptionParser.new do |p|
-            p.banner = "NIGHTMARE - Developer REPL\nUsage: nightmare [options] [workspace_path]"
-            p.on("-s PATH", "--system=PATH", "Path to custom system prompt file") { }
-            p.on("-R PATH", "--read-dir=PATH", "Designate an external directory as readable") { }
-            p.on("-W PATH", "--write-dir=PATH", "Designate an external directory as writable") { }
-            p.on("--no-logs", "--no-log", "Disable logging and run in zero-footprint ghost mode") { }
-            p.on("-m MODEL", "--model=MODEL", "Select model provider or alias") { }
-            p.on("--markdown", "Enable ANSI markdown formatting in terminal") { }
-            p.on("--no-markdown", "Disable ANSI markdown formatting in terminal") { }
-            p.on("-v", "--version", "Show NIGHTMARE version") { }
-            p.on("-h", "--help", "Show help information") { }
-          end
-          io << opts
-        end
+        build(Options.new).to_s
       end
     end
 
-    def self.run(args : Array(String) = ARGV) : Nil
+    def self.execute(
+      args : Array(String) = ARGV,
+      stdin : IO = STDIN,
+      stdout : IO = STDOUT,
+      stderr : IO = STDERR,
+      & : REPL -> Nil
+    ) : Int32
       options = Parser.parse(args)
 
       if err = options.error_message
-        STDERR.puts "Error: #{err}"
-        STDERR.puts Parser.help_text
-        exit 1
+        stderr.puts "Error: #{err}"
+        stderr.puts Parser.help_text
+        return 1
       end
 
       if options.show_version
-        puts "NIGHTMARE #{Nightmare::VERSION}"
-        exit 0
+        stdout.puts "NIGHTMARE #{Nightmare::VERSION}"
+        return 0
       end
 
       if options.show_help
-        puts Parser.help_text
-        exit 0
+        stdout.puts Parser.help_text
+        return 0
       end
 
       # Lazily resolve target_dir: if no explicit workspace path was given via CLI,
@@ -156,9 +151,9 @@ module Nightmare
         begin
           target = Dir.current
         rescue ex : File::Error
-          STDERR.puts "Fatal: Cannot determine current working directory: #{ex.message}"
-          STDERR.puts "The process's CWD may have been deleted. Pass an explicit workspace path as an argument."
-          exit 1
+          stderr.puts "Fatal: Cannot determine current working directory: #{ex.message}"
+          stderr.puts "The process's CWD may have been deleted. Pass an explicit workspace path as an argument."
+          return 1
         end
       end
 
@@ -177,14 +172,30 @@ module Nightmare
           no_log: options.no_log,
           markdown_override: options.markdown
         )
-        repl.start
+        yield repl
+        0
       rescue ex : SecurityError
-        STDERR.puts "Fatal Security Violation: #{ex.message}"
-        exit 1
+        stderr.puts "Fatal Security Violation: #{ex.message}"
+        1
       rescue ex : Exception
-        STDERR.puts "Fatal Error: #{ex.message}"
-        exit 1
+        stderr.puts "Fatal Error: #{ex.message}"
+        1
       end
+    end
+
+    def self.execute(
+      args : Array(String) = ARGV,
+      stdin : IO = STDIN,
+      stdout : IO = STDOUT,
+      stderr : IO = STDERR,
+    ) : Int32
+      execute(args, stdin, stdout, stderr) do |repl|
+        repl.start
+      end
+    end
+
+    def self.run(args : Array(String) = ARGV) : Nil
+      exit execute(args)
     end
   end
 end

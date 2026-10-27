@@ -481,7 +481,7 @@ describe "Nightmare Harness & Step Runner" do
       end
 
       broken_calibrator = Nightmare::Context::TokenEstimator.new
-      broken_presenter = Nightmare::UI::TurnPresenter.new(broken_calibrator)
+      broken_presenter = Nightmare::UI::TurnPresenter.new(broken_calibrator, output: IO::Memory.new)
       wrapped_tools = ToolMiddleware.wrap_all([tool], [ToolMiddleware::Presentation.new(broken_presenter)] of ToolMiddleware::Base)
 
       res = wrapped_tools.first.execute({} of String => JSON::Any)
