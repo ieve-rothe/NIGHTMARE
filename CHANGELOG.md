@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
 ### Added
 - **Home Directory Tilde Path Expansion & Canonical Resolution (TKT-037)**: Canonical tilde (`~` and `~/...`) expansion via `Path.new(path).expand(base: @root, home: true)` across path containment, slash commands (`/plan run`, `/plan review`), and CLI `--system-prompt` resolvers, preventing erroneous `<pwd>/~` workspace pollution.
 - **External PWD Mutation Approval Elevation (TKT-037)**: Mutations targeting paths outside `pwd` (such as `~/.config/...` or sibling repositories) are elevated to interactive user approval instead of triggering hard `Path traversal violation` errors. New files outside `pwd` prompt for approval with unified diff previews, while new files inside `pwd` continue to auto-approve.
