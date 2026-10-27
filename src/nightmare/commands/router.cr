@@ -52,7 +52,7 @@ module Nightmare::Commands
       @stdin : IO = STDIN,
       @stdout : IO = STDOUT,
       skills_manager : Skills::SkillManager? = nil,
-      allowlist : Tools::Allowlist? = nil
+      allowlist : Tools::Allowlist? = nil,
     )
       @skills_manager = skills_manager || Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
       @allowlist = allowlist || Tools::Allowlist.new(@env.allowlist_path)
@@ -145,10 +145,16 @@ module Nightmare::Commands
       when "/exit", "/quit"
         exit(0)
       else
-        puts "Unknown command: #{cmd}. Type /help for available commands."
+        if suggestion = Salamander::Fuzzy.find_closest(cmd, ALL_COMMANDS)
+          puts "Unknown command: #{cmd}. 💡 Did you mean '#{suggestion}'? Type /help for available commands."
+        else
+          puts "Unknown command: #{cmd}. Type /help for available commands."
+        end
         {true, nil}
       end
     end
+
+    ALL_COMMANDS = %w(/help /clear /cls /drop /rm /add /save /prompt /review /recover /thinking /print_last /last /model /paste /plan /mode /theme /skill /allowlist /approvals /exit /quit)
 
     private def clear_screen : Nil
       @stdout.print "\e[2J\e[H"
@@ -207,7 +213,11 @@ HELP
           @env.settings.theme = target
           puts "Theme switched to #{new_theme.title}#{target.upcase}#{Salamander::UI::Theme::RESET}."
         rescue ex : ArgumentError
-          puts ex.message
+          if suggestion = Salamander::Fuzzy.find_closest(target, Salamander::UI::Theme.all_names)
+            puts "Theme '#{target}' not recognized. 💡 Did you mean '#{suggestion}'?"
+          else
+            puts ex.message
+          end
         end
       end
     end
@@ -251,10 +261,10 @@ HELP
 
     private def handle_save(path : String) : Nil
       target_path = if path.empty?
-        File.join(@env.workspace_state_dir, "transcript.md")
-      else
-        @guard.resolve_write(path)
-      end
+                      File.join(@env.workspace_state_dir, "transcript.md")
+                    else
+                      @guard.resolve_write(path)
+                    end
 
       begin
         @transcript.save_to(target_path)
@@ -337,7 +347,12 @@ HELP
         tok = @calibrator.estimate(curr.content.size)
         puts "Activated skill '#{curr.name}' (~#{tok} tokens)."
       when Skills::ToggleStatus::NotFound
-        puts "No skill found matching '#{trimmed}'. Run /skill to see available skills."
+        available_names = @skills_manager.scan_all.map(&.name) + ["off"]
+        if suggestion = Salamander::Fuzzy.find_closest(trimmed, available_names)
+          puts "No skill found matching '#{trimmed}'. 💡 Did you mean '#{suggestion}'? Run /skill to see available skills."
+        else
+          puts "No skill found matching '#{trimmed}'. Run /skill to see available skills."
+        end
       end
     end
 
@@ -430,7 +445,12 @@ HELP
         puts "  /allowlist clear      - Clear all pre-approved rules"
         puts
       else
-        puts "Unknown option '#{subcmd}'. Run /allowlist to view allowlist or /allowlist path."
+        valid_subcmds = %w(path clear rm remove drop)
+        if suggestion = Salamander::Fuzzy.find_closest(subcmd, valid_subcmds)
+          puts "Unknown option '#{subcmd}'. 💡 Did you mean '#{suggestion}'? Run /allowlist to view allowlist or /allowlist path."
+        else
+          puts "Unknown option '#{subcmd}'. Run /allowlist to view allowlist or /allowlist path."
+        end
       end
     end
 
@@ -495,7 +515,7 @@ HELP
       candidates = [
         File.join(@env.workspace_state_dir, "failures"),
         File.join(@env.root, ".nightmare", "failures"),
-        File.join(Dir.current, ".nightmare", "failures")
+        File.join(Dir.current, ".nightmare", "failures"),
       ].uniq
 
       failures_dir = candidates.find { |d| Dir.exists?(d) && !Dir.children(d).empty? } || candidates.first
@@ -515,13 +535,13 @@ HELP
       end
 
       dump_files = if Dir.exists?(failures_dir)
-        Dir.children(failures_dir)
-          .select { |f| f.starts_with?("failure_") && f.ends_with?(".json") }
-          .sort
-          .reverse
-      else
-        [] of String
-      end
+                     Dir.children(failures_dir)
+                       .select { |f| f.starts_with?("failure_") && f.ends_with?(".json") }
+                       .sort
+                       .reverse
+                   else
+                     [] of String
+                   end
 
       case subcmd
       when "", "list"
@@ -541,7 +561,6 @@ HELP
         puts "\nUsage:"
         puts "  /recover view [index|file]    - Inspect details of a failure dump"
         puts "  /recover restore [index|file] - Restore dump into active conversation history\n"
-
       when "view"
         target_file = resolve_dump_file(target_arg.empty? ? "1" : target_arg, dump_files, failures_dir)
         unless target_file
@@ -549,7 +568,6 @@ HELP
           return
         end
         view_dump_details(target_file)
-
       when "restore"
         target_file = resolve_dump_file(target_arg.empty? ? "1" : target_arg, dump_files, failures_dir)
         unless target_file
@@ -557,9 +575,13 @@ HELP
           return
         end
         restore_dump(target_file)
-
       else
-        puts "Unknown option '#{subcmd}'. Run /recover to list dumps or /recover restore [index]."
+        valid_subcmds = %w(list view restore)
+        if suggestion = Salamander::Fuzzy.find_closest(subcmd, valid_subcmds)
+          puts "Unknown option '#{subcmd}'. 💡 Did you mean '#{suggestion}'? Run /recover to list dumps or /recover restore [index]."
+        else
+          puts "Unknown option '#{subcmd}'. Run /recover to list dumps or /recover restore [index]."
+        end
       end
     end
 
@@ -676,10 +698,10 @@ HELP
 
         raw_tool_id = mj["tool_call_id"]?.try(&.as_s?)
         tool_call_id = if role == "tool" && (raw_tool_id.nil? || raw_tool_id.empty?)
-          pending_tool_calls.shift?.try(&.id) || "call_recovered_#{Random::Secure.hex(4)}"
-        else
-          raw_tool_id
-        end
+                         pending_tool_calls.shift?.try(&.id) || "call_recovered_#{Random::Secure.hex(4)}"
+                       else
+                         raw_tool_id
+                       end
 
         if role == "assistant" && tool_calls
           pending_tool_calls.concat(tool_calls)
@@ -868,6 +890,10 @@ HELP
       when "review", "lint"
         handle_plan_review(sub_args)
       else
+        valid_subcmds = %w(run status report review lint)
+        if !subcmd.empty? && (suggestion = Salamander::Fuzzy.find_closest(subcmd, valid_subcmds))
+          puts "Unknown plan subcommand: '#{subcmd}'. 💡 Did you mean '#{suggestion}'?"
+        end
         puts <<-USAGE
 Usage:
   /plan run <path/to/plan.json>    Execute autonomous plan in isolated worktree
@@ -1003,7 +1029,7 @@ USAGE
                       when Nightmare::Plan::PlanItemStatus::Failed    then "❌"
                       when Nightmare::Plan::PlanItemStatus::Running   then "⏳"
                       when Nightmare::Plan::PlanItemStatus::Blocked   then "🚫"
-                      else "⚪"
+                      else                                                 "⚪"
                       end
         puts "  #{status_icon} #{item_id} [#{item_state.status}] (Attempts: #{item_state.attempts}/#{item_state.max_attempts})"
         if s = item_state.summary
@@ -1121,7 +1147,12 @@ USAGE
         puts "  Thermal Resume   : #{@pacer.thermal_resume_celsius}°C"
         puts "Available modes: /mode sprint, /mode pace, /mode step"
       else
-        puts "Unknown mode: #{args}. Usage: /mode [sprint | pace | step]"
+        valid_modes = %w(sprint pace step)
+        if suggestion = Salamander::Fuzzy.find_closest(mode, valid_modes)
+          puts "Unknown mode: #{args}. 💡 Did you mean '#{suggestion}'? Usage: /mode [sprint | pace | step]"
+        else
+          puts "Unknown mode: #{args}. Usage: /mode [sprint | pace | step]"
+        end
       end
     end
 

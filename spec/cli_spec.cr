@@ -91,6 +91,21 @@ describe Nightmare::CLI do
       stdout.to_s.should be_empty
     end
 
+    it "suggests close flags when an invalid option is passed" do
+      stdout = IO::Memory.new
+      stderr = IO::Memory.new
+
+      status = Nightmare::CLI.execute(
+        args: ["--systm"],
+        stdout: stdout,
+        stderr: stderr
+      )
+
+      status.should eq(1)
+      stderr.to_s.should contain("Error: Invalid option: --systm")
+      stderr.to_s.should contain("💡 Did you mean '--system'?")
+    end
+
     it "fails gracefully with exit code 1 for options missing their required arguments" do
       flags = [
         "-s",

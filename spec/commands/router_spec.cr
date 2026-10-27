@@ -111,7 +111,7 @@ describe Nightmare::Commands::Router do
         id: "review-plan",
         goal: "Validate review command",
         items: [
-          Nightmare::Plan::PlanItem.new(id: "step-1", title: "First step")
+          Nightmare::Plan::PlanItem.new(id: "step-1", title: "First step"),
         ]
       )
       plan_path = File.join(temp_dir, "plan.json")
@@ -418,45 +418,45 @@ describe Nightmare::Commands::Router do
 
       begin
         dump_data = {
-          "timestamp" => "2026-09-25T19:19:17Z",
-          "error_code" => "ERR_DEGENERATE_LOOP",
-          "message" => "ERR_DEGENERATE_LOOP: identical call to list_files repeated 5 times.",
+          "timestamp"      => "2026-09-25T19:19:17Z",
+          "error_code"     => "ERR_DEGENERATE_LOOP",
+          "message"        => "ERR_DEGENERATE_LOOP: identical call to list_files repeated 5 times.",
           "offending_tool" => "list_files",
-          "arguments" => {"path" => "old/smc_docs"},
-          "messages" => [
+          "arguments"      => {"path" => "old/smc_docs"},
+          "messages"       => [
             {
-              "role" => "user",
-              "content" => "Organize our docs into canonical vs workspaces",
-              "tool_calls" => nil,
-              "tool_call_id" => nil
+              "role"         => "user",
+              "content"      => "Organize our docs into canonical vs workspaces",
+              "tool_calls"   => nil,
+              "tool_call_id" => nil,
             },
             {
-              "role" => "assistant",
-              "content" => "I will explore the docs first",
+              "role"       => "assistant",
+              "content"    => "I will explore the docs first",
               "tool_calls" => [
-                {"id" => "call_1", "name" => "list_files", "arguments" => "{\"path\":\"old/\"}"}
+                {"id" => "call_1", "name" => "list_files", "arguments" => "{\"path\":\"old/\"}"},
               ],
-              "tool_call_id" => nil
+              "tool_call_id" => nil,
             },
             {
-              "role" => "tool",
-              "content" => "old/doc1.md\nold/doc2.md",
-              "tool_calls" => nil,
-              "tool_call_id" => "call_1"
+              "role"         => "tool",
+              "content"      => "old/doc1.md\nold/doc2.md",
+              "tool_calls"   => nil,
+              "tool_call_id" => "call_1",
             },
             {
-              "role" => "assistant",
-              "content" => "Checking smc_docs",
+              "role"       => "assistant",
+              "content"    => "Checking smc_docs",
               "tool_calls" => [
-                {"id" => "call_2", "name" => "list_files", "arguments" => "{\"path\":\"old/smc_docs\"}"}
+                {"id" => "call_2", "name" => "list_files", "arguments" => "{\"path\":\"old/smc_docs\"}"},
               ],
-              "tool_call_id" => nil
-            }
+              "tool_call_id" => nil,
+            },
           ],
           "token_metrics" => {
-            "iterations" => 5,
-            "prompt_tokens" => 3500
-          }
+            "iterations"    => 5,
+            "prompt_tokens" => 3500,
+          },
         }
 
         filename = "failure_20260925_191917_000_test1234.json"
@@ -675,6 +675,79 @@ describe Nightmare::Commands::Router do
       stdout.to_s.should contain("Cleared all pre-approved commands and prefixes")
       allowlist.persistent_prefix.should be_empty
       allowlist.persistent_exact.should be_empty
+    end
+  end
+
+  describe "Did You Mean fuzzy suggestions" do
+    it "suggests /thinking when /thnk is entered" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/thnk")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown command: /thnk")
+      stdout.to_s.should contain("💡 Did you mean '/thinking'?")
+      stdout.to_s.should contain("Type /help for available commands.")
+    end
+
+    it "suggests /model when /modle is entered" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/modle")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown command: /modle")
+      stdout.to_s.should contain("💡 Did you mean '/model'?")
+    end
+
+    it "falls back cleanly without suggestion for completely unrecognized input" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/qwertyuiop")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown command: /qwertyuiop. Type /help for available commands.")
+      stdout.to_s.should_not contain("Did you mean")
+    end
+
+    it "suggests subcommand in /mode" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/mode sprnt")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown mode: sprnt")
+      stdout.to_s.should contain("💡 Did you mean 'sprint'?")
+    end
+
+    it "suggests subcommand in /plan" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/plan stts")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown plan subcommand: 'stts'")
+      stdout.to_s.should contain("💡 Did you mean 'status'?")
+    end
+
+    it "suggests theme in /theme" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/theme phosfor")
+      handled.should be_true
+      stdout.to_s.should contain("Theme 'phosfor' not recognized")
+      stdout.to_s.should contain("💡 Did you mean 'phosphor'?")
+    end
+
+    it "suggests allowlist subcommand in /allowlist" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/allowlist clr")
+      handled.should be_true
+      stdout.to_s.should contain("Unknown option 'clr'")
+      stdout.to_s.should contain("💡 Did you mean 'clear'?")
     end
   end
 end

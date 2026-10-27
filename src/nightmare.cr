@@ -1,4 +1,5 @@
 require "option_parser"
+require "colorize"
 require "mantle"
 require "salamander"
 require "./nightmare/exceptions"
@@ -128,7 +129,16 @@ module Nightmare
       options = Parser.parse(args)
 
       if err = options.error_message
-        stderr.puts "Error: #{err}"
+        stderr.puts "Error: #{err}".colorize(:red)
+        if err.starts_with?("Invalid option")
+          cli_flags = %w(--system -s --read-dir -R --write-dir -W --no-logs --no-log --model -m --markdown --no-markdown --version -v --help -h)
+          if flag_match = err.match(/(-{1,2}[a-zA-Z0-9_\-]+)/)
+            flag = flag_match[1]
+            if suggestion = Salamander::Fuzzy.find_closest(flag, cli_flags)
+              stderr.puts "💡 Did you mean '#{suggestion}'?".colorize(:yellow)
+            end
+          end
+        end
         stderr.puts Parser.help_text
         return 1
       end
@@ -175,10 +185,10 @@ module Nightmare
         yield repl
         0
       rescue ex : SecurityError
-        stderr.puts "Fatal Security Violation: #{ex.message}"
+        stderr.puts "Fatal Security Violation: #{ex.message}".colorize(:red)
         1
       rescue ex : Exception
-        stderr.puts "Fatal Error: #{ex.message}"
+        stderr.puts "Fatal Error: #{ex.message}".colorize(:red)
         1
       end
     end
