@@ -1,7 +1,7 @@
 ---
 ID: TKT-037
 Title: Home Directory Tilde Path Expansion and External PWD Mutation Elevation
-Status: Resolved
+Status: Closed
 Priority: High
 ---
 

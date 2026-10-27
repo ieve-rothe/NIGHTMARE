@@ -15,11 +15,11 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-034](notes/pm/TKT-034-resilient-unknown-tool-handling-and-shell-alias.md) | Resilient Unknown Tool Handling in Mantle Step and Shell Tool Alias in Nightmare | Harness Stability & Tool Ergonomics | Resolved | High | 2026-10-10 |
 | [TKT-035](notes/pm/TKT-035-shell-command-prefix-approval-visibility-and-editing.md) | Shell Command Prefix Approval, Candidate Visibility, Inline Prefix Editing, and Pre-Approved Command Visibility | Execution Security & Tool Ergonomics | Resolved | High | 2026-10-10 |
 | [TKT-036](notes/pm/TKT-036-resilient-binary-and-utf8-tool-output-handling.md) | Resilient Binary and UTF-8 Tool Output Handling Across Mantle, Salamander, and Nightmare | Harness Stability & Error Resilience | Resolved | High | 2026-10-10 |
-| [TKT-037](notes/pm/TKT-037-home-directory-tilde-expansion-and-user-config-writes.md) | Home Directory Tilde Path Expansion and External PWD Mutation Elevation | Execution Security & Tool Ergonomics | Resolved | High | 2026-10-24 |
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| [TKT-037](notes/pm/closed/TKT-037-home-directory-tilde-expansion-and-user-config-writes.md) | Home Directory Tilde Path Expansion and External PWD Mutation Elevation | Execution Security & Tool Ergonomics | Closed | High | 2026-10-24 |
 | [TKT-031](notes/pm/closed/TKT-031-context-overflow-qwen-missing-user-query.md) | Context Overflow Classification and Large Tool Output Pruning (Qwen Missing User Query) | Context Management & Stability | Closed | High | 2026-10-06 |
 | [TKT-032](notes/pm/closed/TKT-032-prevent-spec-suite-xdg-workspace-pollution.md) | Prevent Spec Suite XDG Workspace Pollution in State and Cache Directories | Testing & Workspace Isolation | Closed | High | 2026-10-06 |
 | [TKT-030](notes/pm/closed/TKT-030-display-cwd-in-cli-prompt.md) | Display Current Working Directory in CLI Interface and Prompt | User Interface & Tooling | Closed | Med | 2026-10-03 |
