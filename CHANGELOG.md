@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Live Harness Tool Governance & Availability Policies (TKT-038)**: Introduced `Nightmare::Tools::Policy` and `/tools` slash command suite (`/tools status`, `/tools off`, `/tools on`, `/tools limit`, `/tools preset`, `/tools reset`) to dynamically disable/enable tools or tool groups (`read`, `mutation`/`write`, `shell`, `subagent`, `web`), inspect tool execution telemetry, and activate curated security stances (`read-only`, `safe-edit`, `no-shell`, `default`).
+- **Cascade Quota Revocation (TKT-038)**: Tool quotas (`/tools limit <tool> <N> [--scope turn|session] [--cascade <target>]`) enforce usage caps at turn or session scope and automatically trigger cascade revocation on linked tools (e.g. revoking `run_command` whenever `read_file` quota is exhausted to prevent circumvention via shell utilities like `cat` or `head`).
+- **Policy Enforcement Middleware & Dynamic Schema Filtering (TKT-038)**: Attached `ToolMiddleware::PolicyEnforcer` to reject disallowed or quota-exhausted tool calls before execution, and updated `StepRunner` to dynamically omit disabled tools from function schemas sent to the model and refresh schemas per-iteration upon quota trips.
+- **Live Session Hardmax Override & Next-Turn Pruning (TKT-038)**: Added `/tokens` (aliased to `/budget`) slash command suite (`/tokens status`, `/tokens hardmax <amount | default>`) to set a live session override for context window hardmax; `REPL#execute_turn` invokes `SlidingStore#prune_to_hardmax!` to automatically prune historical turns if context exceeds the overridden cap.
+- **Terminal UI Testing & Stream Injection (TKT-038, GUIDANCE §1)**: Wired abstract `stdin` and `stdout` streams from `Nightmare::CLI.execute` into `REPL`, `Commands::Router`, `Approval`, and `TurnPresenter`, and added a non-terminating `on_exit` hook to allow direct in-process terminal UI testing of REPL interactive commands and slash workflows without subprocesses or `exit(0)` crashes.
+
 ## [0.7.0] - 2026-10-26
 
 ### Added

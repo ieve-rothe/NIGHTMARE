@@ -11,6 +11,7 @@ require "./tool_loop"
 require "./retrier"
 require "./loop_detector"
 require "../ui/turn_presenter"
+require "../tools/policy"
 
 module Nightmare::Harness
   class StepRunner
@@ -24,6 +25,7 @@ module Nightmare::Harness
     property overflow_retries : Int32
     property failures_dir : String
     property turn_presenter : UI::TurnPresenter? = nil
+    property policy : Tools::Policy? = nil
 
     def initialize(
       @client : Mantle::Clients::Client,
@@ -103,7 +105,11 @@ module Nightmare::Harness
       loop do
         messages = store.assemble_messages(system_prompt, pinned_block, skill_block)
 
+        step : Mantle::Step? = nil
         on_iter = ->(working_msgs : Array(Mantle::Message), last_res : Mantle::Clients::Response?) {
+          if (pol = @policy) && (s = step)
+            s.tools = @tools.reject { |t| pol.disabled?(t.function.name) }
+          end
           if last_res
             if txt = last_res.content
               if presenter = @turn_presenter
@@ -119,15 +125,21 @@ module Nightmare::Harness
           @tool_loop.on_iteration_hook(store).call(working_msgs, last_res)
         }
 
+        active_tools = if pol = @policy
+          @tools.reject { |t| pol.disabled?(t.function.name) }
+        else
+          @tools
+        end
+
         step = Mantle::Step.new(
           client: @client,
-          tools: @tools,
+          tools: active_tools,
           max_iterations: @max_iterations,
           on_iteration: on_iter
         )
 
         begin
-          result = step.run(messages, &wrapped_stream)
+          result = step.not_nil!.run(messages, &wrapped_stream)
 
           if @tool_loop.cancelled? || (result.err? && result.error_message.try(&.includes?("Turn cancelled by user interrupt")))
             rolled_back = store.rollback_turn

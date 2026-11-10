@@ -488,5 +488,59 @@ describe "Nightmare Harness & Step Runner" do
       res.should eq("tool ran successfully")
       executed.should be_true
     end
+
+    it "enforces ToolMiddleware::PolicyEnforcer refusing disabled tools and cascading quotas" do
+      read_calls = 0
+      bash_calls = 0
+
+      read_tool = Mantle::Tools::Tool.new(
+        function: Mantle::Tools::FunctionDefinition.new(
+          name: "read_file",
+          description: "Reads file",
+          parameters: Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+        )
+      ) do |_|
+        read_calls += 1
+        "file contents"
+      end
+
+      bash_tool = Mantle::Tools::Tool.new(
+        function: Mantle::Tools::FunctionDefinition.new(
+          name: "run_command",
+          description: "Runs shell",
+          parameters: Mantle::Tools::ParametersSchema.new({} of String => Mantle::Tools::PropertyDefinition)
+        )
+      ) do |_|
+        bash_calls += 1
+        "command output"
+      end
+
+      policy = Nightmare::Tools::Policy.new
+      # Limit read_file to 1 call, cascading to run_command
+      policy.set_limit("read_file", limit: 1, scope: Nightmare::Tools::QuotaScope::Turn, cascade: ["run_command"])
+
+      wrapped = ToolMiddleware.wrap_all([read_tool, bash_tool], [ToolMiddleware::PolicyEnforcer.new(policy)] of ToolMiddleware::Base)
+      wrapped_read = wrapped.find { |t| t.function.name == "read_file" }.not_nil!
+      wrapped_bash = wrapped.find { |t| t.function.name == "run_command" }.not_nil!
+
+      # 1st read_file call succeeds
+      res1 = wrapped_read.execute({} of String => JSON::Any)
+      res1.should eq("file contents")
+      read_calls.should eq(1)
+
+      # Quota is exhausted (1/1) -> read_file and run_command must both be disabled
+      policy.disabled?("read_file").should be_true
+      policy.disabled?("run_command").should be_true
+
+      # 2nd read_file call is refused by policy
+      res2 = wrapped_read.execute({} of String => JSON::Any)
+      res2.should contain("quota exceeded")
+      read_calls.should eq(1)
+
+      # Attempting bash run_command (e.g. cat file) is refused by policy
+      res_bash = wrapped_bash.execute({} of String => JSON::Any)
+      res_bash.should contain("disabled")
+      bash_calls.should eq(0)
+    end
   end
 end

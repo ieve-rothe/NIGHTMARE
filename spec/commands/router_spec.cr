@@ -750,4 +750,107 @@ describe Nightmare::Commands::Router do
       stdout.to_s.should contain("💡 Did you mean 'clear'?")
     end
   end
+
+  describe "/tools and /tokens command suite" do
+    it "renders tools status dashboard" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tools")
+      handled.should be_true
+      output = stdout.to_s
+      output.should contain("Tool Governance & Availability")
+      output.should contain("read_file")
+      output.should contain("run_command")
+      output.should contain("spawn_subagent")
+      output.should contain("ENABLED")
+    end
+
+    it "disables and enables tools via /tools off and /tools on" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tools off spawn_subagent")
+      handled.should be_true
+      router.tool_policy.disabled?("spawn_subagent").should be_true
+
+      handled, _ = router.handle("/tools on spawn_subagent")
+      handled.should be_true
+      router.tool_policy.disabled?("spawn_subagent").should be_false
+    end
+
+    it "disables tool groups via /tools off" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tools off mutation")
+      handled.should be_true
+      router.tool_policy.disabled?("write_file").should be_true
+      router.tool_policy.disabled?("replace_in_file").should be_true
+      router.tool_policy.disabled?("append_to_file").should be_true
+    end
+
+    it "configures tool limits and cascades via /tools limit" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tools limit read_file 3 --scope turn --cascade run_command")
+      handled.should be_true
+      quota = router.tool_policy.quotas["read_file"]?
+      quota.should_not be_nil
+      quota.not_nil!.limit.should eq(3)
+      quota.not_nil!.cascade_revocations.should contain("run_command")
+    end
+
+    it "applies presets and resets via /tools preset and /tools reset" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tools preset read-only")
+      handled.should be_true
+      router.tool_policy.disabled?("write_file").should be_true
+      router.tool_policy.disabled?("run_command").should be_true
+
+      handled, _ = router.handle("/tools reset")
+      handled.should be_true
+      router.tool_policy.disabled_tools.should be_empty
+    end
+
+    it "inspects tokens via /tokens status" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      handled, _ = router.handle("/tokens")
+      handled.should be_true
+      output = stdout.to_s
+      output.should contain("Session Token Budget & Context Window")
+      output.should contain("Active Context Tokens:")
+      output.should contain("Turn Soft Cap:")
+    end
+
+    it "configures session hardmax override via /tokens hardmax and prunes context" do
+      stdout = IO::Memory.new
+      router = RouterSpecHelper.build_test_router(stdout: stdout)
+
+      # Create historical turns in store
+      3.times do |i|
+        turn = Mantle::Storage::Turn.new(Mantle::Message.new("user", "User prompt #{i} " + ("a" * 400)))
+        turn.append_assistant(Mantle::Message.new("assistant", "Assistant response #{i} " + ("b" * 400)))
+        router.store.push_turn(turn)
+      end
+
+      # Set session hardmax override to 300 tokens
+      handled, _ = router.handle("/tokens hardmax 300")
+      handled.should be_true
+      router.store.hardmax.should eq(300)
+      stdout.to_s.should contain("Session token hardmax set to 300")
+      router.store.history.size.should be < 3
+
+      # Restore to default
+      handled, _ = router.handle("/tokens hardmax default")
+      handled.should be_true
+      router.store.hardmax.should eq(router.env.settings.token_hardmax)
+      stdout.to_s.should contain("restored to configured default")
+    end
+  end
 end

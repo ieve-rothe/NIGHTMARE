@@ -7,12 +7,35 @@ require "../harness/loop_detector"
 require "../harness/tool_loop"
 require "../ui/turn_presenter"
 
+require "./policy"
+
 module Nightmare::Tools
   class CommandFailedError < Mantle::Tools::CommandFailedError
   end
 end
 
 module ToolMiddleware
+  # Policy enforcer middleware intercepts tool execution and validates against the active ToolPolicy
+  class PolicyEnforcer < Base
+    getter policy : Nightmare::Tools::Policy
+
+    def initialize(@policy : Nightmare::Tools::Policy)
+    end
+
+    def call(
+      tool_name : String,
+      args : Hash(String, JSON::Any),
+      next_handler : Proc(Hash(String, JSON::Any), String)
+    ) : String
+      allowed, reason = @policy.check_and_record(tool_name)
+      if !allowed
+        {error: reason || "Tool '#{tool_name}' execution disallowed by policy.", refused: true}.to_json
+      else
+        next_handler.call(args)
+      end
+    end
+  end
+
   # Loop detector middleware acts as a hard circuit breaker, raising LoopCircuitBreakerException on repeat breach
   class LoopDetector < Base
     getter detector : Nightmare::Harness::LoopDetector

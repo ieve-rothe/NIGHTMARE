@@ -217,5 +217,28 @@ describe "Shedder and SlidingStore Context Engine" do
       msgs[0].role.should eq("system")
       msgs[0].content.not_nil!.should eq(Nightmare::Context::SlidingStore.current_date_note)
     end
+
+    it "prunes historical turns when hardmax is dynamically lowered for session override" do
+      store = Nightmare::Context::SlidingStore.new(hardmax: 10_000)
+      calibrator = Nightmare::Context::TokenEstimator.new(divisor: 4.0)
+
+      # Populate 3 historical turns of ~400 tokens (1600 chars each)
+      3.times do |i|
+        t = store.start_turn("Question #{i + 1}")
+        t.append_assistant(Mantle::Message.new("assistant", "Answer #{i + 1}: " + ("x" * 1600)))
+        store.commit_turn
+      end
+      store.history.size.should eq(3)
+
+      # Start active turn
+      store.start_turn("Active Turn")
+
+      # Lower hardmax dynamically to 500 tokens
+      store.hardmax = 500
+      pruned = store.prune_to_hardmax!(calibrator, system_prompt: "Sys")
+      pruned.should be > 0
+      # Should have pruned older historical turns to stay within 500 tokens
+      store.history.size.should be < 3
+    end
   end
 end

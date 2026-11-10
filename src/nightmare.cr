@@ -180,7 +180,9 @@ module Nightmare
           system_prompt_path: options.system_prompt_path,
           model_override: options.model,
           no_log: options.no_log,
-          markdown_override: options.markdown
+          markdown_override: options.markdown,
+          stdin: stdin,
+          stdout: stdout
         )
         yield repl
         0

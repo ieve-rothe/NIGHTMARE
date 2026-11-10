@@ -22,6 +22,8 @@ NIGHTMARE provides a suite of slash commands and input modes to inspect context,
 | `/theme` | `[name]` | List available themes or switch the active UI theme. |
 | `/mode` | `sprint`, `pace`, `step` | Configure plan execution pacing and thermal limits. |
 | `/plan` | `run`, `status`, `report`, `review` | Manage autonomous plan execution. |
+| `/tools` | `status`, `off`, `on`, `limit`, `preset`, `reset` | Live harness tool availability, quotas, and cascades. |
+| `/tokens` | `status`, `hardmax <N>` | Inspect token usage and set session context hardmax (or `/budget`). |
 | `/exit` or `/quit`| - | Exit the session. |
 
 ---
@@ -161,6 +163,37 @@ Lists available UI themes or switches the active syntax formatting theme. Availa
 Inspects or switches the active LLM model.
 ```bash
 /model qwen2.5-coder:7b
+```
+
+---
+
+## Tool Governance & Resource Limits
+
+### `/tools`
+Controls live tool availability and usage quotas during an active session:
+- `/tools` or `/tools status`: Renders a table of all 10 tools, status, call counts, quotas, and cascades.
+- `/tools off <tool... | group...>`: Disables tools or groups (`read`, `write`/`mutation`, `shell`, `subagent`, `web`).
+- `/tools on <tool... | group...>`: Enables tools or groups.
+- `/tools limit <tool> <N> [--scope turn|session] [--cascade <target>]`: Sets a quota. For `read_file`, defaults to cascading to `run_command` upon exhaustion to prevent agent circumvention via bash.
+- `/tools preset <name>`: Applies a preset (`read-only`, `safe-edit`, `no-shell`, `default`).
+- `/tools reset`: Restores default tool availability and resets quotas.
+
+```bash
+/tools off spawn_subagent web_search
+/tools limit read_file 5 --cascade run_command
+/tools preset read-only
+```
+
+### `/tokens`
+Monitors session token consumption and allows live session overrides for the context window hardmax:
+- `/tokens` or `/tokens status`: Displays active context tokens, hardmax, soft cap, and token calibrator divisor.
+- `/tokens hardmax <N>`: Configures a session override for the token hardmax (supports `7000`, `7k`). When current context exceeds this value, historical turns are pruned on the next turn to fit within the limit.
+- `/tokens hardmax default`: Restores the hardmax to the configured default in settings.
+
+```bash
+/tokens
+/tokens hardmax 7k
+/tokens hardmax default
 ```
 
 ---

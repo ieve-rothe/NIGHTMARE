@@ -28,6 +28,7 @@ require "./ui/editor"
 require "./ui/prompt"
 require "./commands/router"
 require "./skills"
+require "./tools/policy"
 
 module Nightmare
   class REPL
@@ -40,6 +41,7 @@ module Nightmare
     getter allowlist : Tools::Allowlist
     getter approval : UI::Approval
     getter registry : Tools::Registry
+    getter tool_policy : Tools::Policy
     getter tool_loop : Harness::ToolLoop
     getter step_runner : Harness::StepRunner
     getter stream_ctrl : UI::StreamController
@@ -48,6 +50,9 @@ module Nightmare
     getter router : Commands::Router
     getter skills_manager : Skills::SkillManager
     getter model_name : String
+    getter stdin : IO
+    getter stdout : IO
+    property? running : Bool = false
     getter? no_log : Bool
     getter? markdown_formatting : Bool
 
@@ -57,6 +62,8 @@ module Nightmare
       model_override : String? = nil,
       @no_log : Bool = false,
       markdown_override : Bool? = nil,
+      @stdin : IO = STDIN,
+      @stdout : IO = STDOUT,
     )
       @markdown_formatting = @env.resolve_markdown_formatting(markdown_override)
       @no_log = @no_log || !@env.resolve_logging(cli_no_log: @no_log)
@@ -86,7 +93,7 @@ module Nightmare
       @guard = Tools::Guard.new(@env)
       allow_path = File.join(@env.workspace_config_dir, "allow")
       @allowlist = Tools::Allowlist.new(allow_path)
-      @approval = UI::Approval.new(@env.root)
+      @approval = UI::Approval.new(@env.root, input: @stdin, output: @stdout)
 
       # 6. Mantle LLM client
       api_url = @env.resolve_api_url
@@ -111,7 +118,8 @@ module Nightmare
         calibrator: @calibrator,
         threshold_multiplier: @env.settings.file_card_threshold_screens,
         preview_lines: @env.settings.file_card_preview_lines,
-        max_width: @env.settings.max_dashboard_width
+        max_width: @env.settings.max_dashboard_width,
+        output: @stdout
       )
 
       diff_cb = ->(diff : String, desc : String) { @approval.approve_diff(diff, desc) }
@@ -142,8 +150,10 @@ module Nightmare
         tool_output_max_bytes: @env.settings.tool_output_max_bytes,
         subagent_runner: subagent_runner
       )
+      @tool_policy = Tools::Policy.new
       cyclic_breaker = Mantle::Tools::Middleware::CyclicReadBreaker.new
       @registry.middlewares = [
+        ToolMiddleware::PolicyEnforcer.new(@tool_policy),
         ToolMiddleware::Presentation.new(@turn_presenter),
         ToolMiddleware::LoopDetector.new(loop_detector),
         cyclic_breaker,
@@ -175,6 +185,7 @@ module Nightmare
         failures_dir: failures_directory,
         no_log: @no_log
       )
+      @step_runner.policy = @tool_policy
       @step_runner.turn_presenter = @turn_presenter
 
       @stream_ctrl = UI::StreamController.new
@@ -182,8 +193,8 @@ module Nightmare
         if @turn_presenter.split_mode_active?
           @turn_presenter.append_stream_text(s)
         else
-          print s
-          STDOUT.flush
+          @stdout.print s
+          @stdout.flush
         end
       }
 
@@ -204,16 +215,21 @@ module Nightmare
         current_model: @model_name,
         on_model_change: on_model,
         client: client,
+        stdin: @stdin,
+        stdout: @stdout,
         skills_manager: @skills_manager,
-        allowlist: @allowlist
+        allowlist: @allowlist,
+        tool_policy: @tool_policy
       )
+      @router.on_exit = -> { @running = false }
     end
 
     def start : Nil
-      puts @env.startup_banner(no_log: @no_log)
-      STDOUT.flush
+      @running = true
+      @stdout.puts @env.startup_banner(no_log: @no_log)
+      @stdout.flush
 
-      loop do
+      while @running
         cwd = begin
           Dir.current
         rescue
@@ -223,12 +239,12 @@ module Nightmare
           cwd: cwd,
           active_skill_name: @skills_manager.active_skill.try(&.name)
         )
-        print "#{prompt_str}#{Salamander::UI::Theme.user_prompt}"
-        STDOUT.flush
+        @stdout.print "#{prompt_str}#{Salamander::UI::Theme.user_prompt}"
+        @stdout.flush
 
-        line = STDIN.gets
-        print Salamander::UI::Theme::RESET
-        STDOUT.flush
+        line = @stdin.gets
+        @stdout.print Salamander::UI::Theme::RESET
+        @stdout.flush
         if line.nil?
           if @cancellation.sigint_received?
             @cancellation.sigint_received = false
@@ -243,7 +259,7 @@ module Nightmare
 
         if @router.slash_command?(trimmed)
           handled, payload = @router.handle(trimmed)
-          if payload
+          if payload && @running
             execute_turn(payload)
           end
         elsif trimmed.ends_with?("/exit")
@@ -255,6 +271,7 @@ module Nightmare
     end
 
     private def execute_turn(user_input : String) : Nil
+      @tool_policy.reset_turn
       @cancellation.busy = true
       @cancellation.sigint_received = false
       @stream_ctrl.reset
@@ -273,6 +290,10 @@ module Nightmare
 
       pinned_block = @pinned_files.render_pinned_block(@guard)
       skill_block = @skills_manager.active_skill.try(&.formatted_block)
+
+      # Prune historical context if live hardmax override is exceeded
+      @store.prune_to_hardmax!(@calibrator, @router.current_prompt, pinned_block, skill_block)
+
       start_time = Time.instant
 
       turn_sequence_id = UUID.random.to_s
@@ -294,7 +315,8 @@ module Nightmare
 
       if outcome.ok?
         val = outcome.value.not_nil!
-        if @markdown_formatting && STDOUT.tty?
+        is_tty = @stdout.as?(IO::FileDescriptor).try(&.tty?) || false
+        if @markdown_formatting && is_tty
           if !@stream_ctrl.visible_text.empty? || !val.empty?
             action_lbl = if !side_effects.empty?
               if side_effects.size == 1
@@ -321,15 +343,15 @@ module Nightmare
               end
             end
           end
-          STDOUT.flush
+          @stdout.flush
         else
           # If streaming didn't output visible text, output value
           if @stream_ctrl.visible_text.empty? && !val.empty?
             puts val
-            STDOUT.flush
+            @stdout.flush
           else
             puts unless @stream_ctrl.visible_text.ends_with?('\n')
-            STDOUT.flush
+            @stdout.flush
           end
         end
 
@@ -347,13 +369,21 @@ module Nightmare
         else
           puts "\n[Error: #{err.message}]"
         end
-        STDOUT.flush
+        @stdout.flush
       end
     ensure
       Mantle::Clients::LoggingClient.flush
       @registry.set_active_side_effects(nil)
       @cancellation.busy = false
       @cancellation.sigint_received = false
+    end
+
+    private def puts(obj = "") : Nil
+      @stdout.puts(obj)
+    end
+
+    private def print(obj) : Nil
+      @stdout.print(obj)
     end
   end
 end

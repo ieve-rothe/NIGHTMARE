@@ -13,6 +13,7 @@ require "../plan"
 require "../harness/subagent_runner"
 require "../config"
 require "../skills"
+require "../tools/policy"
 require "colorize"
 
 module Nightmare::Commands
@@ -24,6 +25,7 @@ module Nightmare::Commands
     getter env : Workspace::Environment
     getter skills_manager : Skills::SkillManager
     getter allowlist : Tools::Allowlist
+    property tool_policy : Tools::Policy
     property transcript : Transcript
     property current_prompt : String
     property current_model : String
@@ -36,6 +38,7 @@ module Nightmare::Commands
 
     getter stdin : IO
     getter stdout : IO
+    property on_exit : Proc(Nil) = -> { exit(0) }
 
     def initialize(
       @store : Context::SlidingStore,
@@ -53,9 +56,11 @@ module Nightmare::Commands
       @stdout : IO = STDOUT,
       skills_manager : Skills::SkillManager? = nil,
       allowlist : Tools::Allowlist? = nil,
+      tool_policy : Tools::Policy? = nil,
     )
       @skills_manager = skills_manager || Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
       @allowlist = allowlist || Tools::Allowlist.new(@env.allowlist_path)
+      @tool_policy = tool_policy || Tools::Policy.new
     end
 
     # Checks if an input line is a slash command or multiline trigger
@@ -142,8 +147,15 @@ module Nightmare::Commands
       when "/allowlist", "/approvals"
         handle_allowlist(args)
         {true, nil}
+      when "/tools"
+        handle_tools(args)
+        {true, nil}
+      when "/tokens", "/budget"
+        handle_tokens(args)
+        {true, nil}
       when "/exit", "/quit"
-        exit(0)
+        @on_exit.call
+        {true, nil}
       else
         if suggestion = Salamander::Fuzzy.find_closest(cmd, ALL_COMMANDS)
           puts "Unknown command: #{cmd}. 💡 Did you mean '#{suggestion}'? Type /help for available commands."
@@ -154,7 +166,7 @@ module Nightmare::Commands
       end
     end
 
-    ALL_COMMANDS = %w(/help /clear /cls /drop /rm /add /save /prompt /review /recover /thinking /print_last /last /model /paste /plan /mode /theme /skill /allowlist /approvals /exit /quit)
+    ALL_COMMANDS = %w(/help /clear /cls /drop /rm /add /save /prompt /review /recover /thinking /print_last /last /model /paste /plan /mode /theme /skill /allowlist /approvals /tools /tokens /budget /exit /quit)
 
     private def clear_screen : Nil
       @stdout.print "\e[2J\e[H"
@@ -173,6 +185,8 @@ module Nightmare::Commands
       puts <<-HELP
 Available Slash Commands:
   /help            Show this help reference
+  /tools           Manage live tool availability, quotas & presets (/tools status)
+  /tokens          Inspect token usage and set context hardmax (/budget)
   /allowlist       Inspect or manage pre-approved shell commands (/approvals)
   /plan run <file> Execute autonomous plan in isolated Git worktree
   /plan status [id]Inspect active or recent plan run state
@@ -1171,6 +1185,205 @@ USAGE
         latest_file = Dir.glob(File.join(@env.workspace_state_dir, "run-*.json")).max_by? { |f| File.info(f).modification_time }
         latest_file ? Nightmare::Plan::Storage.load_run(latest_file) : nil
       end
+    end
+
+    private def handle_tools(args : String) : Nil
+      parts = args.split(' ', 2)
+      subcmd = parts[0].downcase
+      subarg = parts.size > 1 ? parts[1].strip : ""
+
+      case subcmd
+      when "", "status"
+        render_tools_dashboard
+      when "off", "disable"
+        if subarg.empty?
+          puts "Usage: /tools off <tool_name | group> (e.g. /tools off spawn_subagent, /tools off mutation, /tools off shell)"
+          return
+        end
+        targets = subarg.split(' ').map(&.strip).reject(&.empty?)
+        disabled = [] of String
+        targets.each do |target|
+          disabled.concat(@tool_policy.disable(target))
+        end
+        puts "Disabled tool(s): #{disabled.uniq.join(", ")}"
+      when "on", "enable"
+        if subarg.empty?
+          puts "Usage: /tools on <tool_name | group> (e.g. /tools on run_command, /tools on mutation)"
+          return
+        end
+        targets = subarg.split(' ').map(&.strip).reject(&.empty?)
+        enabled = [] of String
+        targets.each do |target|
+          enabled.concat(@tool_policy.enable(target))
+        end
+        puts "Enabled tool(s): #{enabled.uniq.join(", ")}"
+      when "limit"
+        handle_tools_limit(subarg)
+      when "unlimit", "removelimit"
+        if subarg.empty?
+          puts "Usage: /tools unlimit <tool_name>"
+          return
+        end
+        if @tool_policy.remove_limit(subarg)
+          puts "Removed limit for #{subarg}."
+        else
+          puts "No limit was configured for #{subarg}."
+        end
+      when "preset"
+        if subarg.empty?
+          puts "Available presets: read-only, safe-edit, no-shell, default"
+          puts "Usage: /tools preset <name>"
+          return
+        end
+        if @tool_policy.apply_preset(subarg)
+          puts "Applied tool preset '#{subarg}'."
+        else
+          puts "Unknown preset '#{subarg}'. Available presets: read-only, safe-edit, no-shell, default"
+        end
+      when "reset"
+        @tool_policy.reset_all
+        puts "Reset all tool availability, quotas, and counters."
+      else
+        puts "Unknown subcommand: #{subcmd}. Usage: /tools [status | off | on | limit | unlimit | preset | reset]"
+      end
+    end
+
+    private def handle_tools_limit(subarg : String) : Nil
+      tokens = subarg.split(' ').reject(&.empty?)
+      tool_name = tokens[0]?
+      count_str = tokens[1]?
+      if tool_name.nil? || count_str.nil? || count_str.to_i?.nil?
+        puts "Usage: /tools limit <tool> <number> [--scope turn|session] [--cascade <target_tool>]"
+        return
+      end
+      count = count_str.to_i
+      scope = Tools::QuotaScope::Turn
+      cascades = [] of String
+
+      i = 2
+      while i < tokens.size
+        flag = tokens[i]
+        val = tokens[i + 1]?
+        if flag == "--scope" && val
+          case val.downcase
+          when "turn" then scope = Tools::QuotaScope::Turn
+          when "session" then scope = Tools::QuotaScope::Session
+          end
+          i += 2
+        elsif flag == "--cascade" && val
+          cascades << val
+          i += 2
+        else
+          i += 1
+        end
+      end
+
+      quota = @tool_policy.set_limit(tool_name, count, scope: scope, cascade: cascades)
+      cascade_msg = quota.cascade_revocations.empty? ? "" : " (cascades to: #{quota.cascade_revocations.join(", ")})"
+      puts "Configured quota for '#{Tools::Policy.normalize_tool_name(tool_name)}': max #{count}/#{scope}#{cascade_msg}."
+    end
+
+    private def render_tools_dashboard : Nil
+      puts "\n=== Tool Governance & Availability ==="
+      puts "%-18s %-10s %-12s %-14s %s" % ["Tool", "Status", "Turn Calls", "Session Calls", "Quota / Cascades"]
+      puts "─" * 78
+      Tools::Policy::ALL_TOOLS.each do |tool|
+        disabled = @tool_policy.disabled?(tool)
+        status_str = if disabled
+          "\e[31mDISABLED\e[0m"
+        else
+          "\e[32mENABLED\e[0m"
+        end
+        turn_c = @tool_policy.turn_calls[tool]? || 0
+        sess_c = @tool_policy.session_calls[tool]? || 0
+
+        quota_str = if q = @tool_policy.quotas[tool]?
+          c_list = q.cascade_revocations.empty? ? "" : " → Cascade: #{q.cascade_revocations.join(", ")}"
+          "Max #{q.limit}/#{q.scope} (#{q.used} used)#{c_list}"
+        else
+          "-"
+        end
+
+        puts "%-18s %-20s %-12d %-14d %s" % [tool, status_str, turn_c, sess_c, quota_str]
+      end
+      puts
+    end
+
+    private def handle_tokens(args : String) : Nil
+      parts = args.split(' ', 2)
+      subcmd = parts[0].downcase
+      subarg = parts.size > 1 ? parts[1].strip : ""
+
+      case subcmd
+      when "", "status"
+        render_tokens_status
+      when "hardmax", "max"
+        if subarg.empty?
+          puts "Current token hardmax: #{@store.hardmax} tokens (default: #{@env.settings.token_hardmax})."
+          puts "Usage: /tokens hardmax <amount | default> (e.g. /tokens hardmax 7000, /tokens hardmax 7k)"
+          return
+        end
+        if subarg == "default" || subarg == "reset"
+          old_max = @store.hardmax
+          @store.hardmax = @env.settings.token_hardmax
+          puts "Session token hardmax restored to configured default: #{@store.hardmax} tokens (was: #{old_max})."
+        else
+          new_max = parse_token_amount(subarg)
+          if new_max.nil? || new_max <= 0
+            puts "Invalid token amount '#{subarg}'. Specify a positive integer or suffix like '7k'."
+            return
+          end
+          old_max = @store.hardmax
+          @store.hardmax = new_max
+          pinned_block = @pinned_files.render_pinned_block(@guard)
+          skill_block = @skills_manager.active_skill.try(&.formatted_block)
+          current = @store.total_estimated_tokens(@calibrator, @current_prompt, pinned_block, skill_block)
+          if current > new_max
+            pruned = @store.prune_to_hardmax!(@calibrator, @current_prompt, pinned_block, skill_block)
+            puts "Session token hardmax set to #{new_max} (was: #{old_max})."
+            puts "Context pruned: #{current} -> #{pruned} tokens."
+          else
+            puts "Session token hardmax set to #{new_max} (was: #{old_max}). Current context: #{current} tokens."
+          end
+        end
+      else
+        puts "Unknown subcommand: #{subcmd}. Usage: /tokens [status | hardmax <amount | default>]"
+      end
+    end
+
+    private def parse_token_amount(raw : String) : Int32?
+      s = raw.strip.downcase
+      multiplier = 1
+      if s.ends_with?('k')
+        multiplier = 1_000
+        s = s[0...-1]
+      elsif s.ends_with?('m')
+        multiplier = 1_000_000
+        s = s[0...-1]
+      end
+      if val = s.to_i?
+        val * multiplier
+      else
+        nil
+      end
+    end
+
+    private def render_tokens_status : Nil
+      pinned_block = @pinned_files.render_pinned_block(@guard)
+      skill_block = @skills_manager.active_skill.try(&.formatted_block)
+      current_tokens = @store.total_estimated_tokens(@calibrator, @current_prompt, pinned_block, skill_block)
+      hardmax = @store.hardmax
+      default_hardmax = @env.settings.token_hardmax
+      override_note = (hardmax != default_hardmax) ? " (Session Override)" : ""
+
+      pct = (current_tokens.to_f / hardmax * 100).clamp(0.0, 100.0)
+      puts "\n=== Session Token Budget & Context Window ==="
+      puts "Active Context Tokens:  #{current_tokens} / #{hardmax} (#{pct.round(1)}%)#{override_note}"
+      puts "Configured Default:    #{default_hardmax} tokens"
+      puts "Turn Soft Cap:         #{@store.soft_cap} turns (in history: #{@store.history.size})"
+      puts "Calibrator Divisor:    #{@calibrator.divisor.round(2)} chars/token"
+      puts "Turn Spend Cap:        #{@env.settings.turn_spend_cap_tokens} tokens"
+      puts
     end
   end
 end
