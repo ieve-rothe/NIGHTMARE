@@ -64,6 +64,9 @@ property last_active_file : OpenedFile? = nil
 property last_active_offset : Int32 = 1
 property last_action_label : String? = nil
 property system_messages : Array(String) = [] of String
+property turn_stream_start_idx : Int32 = 0
+property? turn_separator_emitted : Bool = false
+property split_mode_override : Bool? = nil
 
 
     def initialize(
@@ -78,13 +81,36 @@ property system_messages : Array(String) = [] of String
     end
 
     def split_mode_active? : Bool
-  @enabled && Salamander::UI.terminal_width > @max_width + 50 && STDOUT.tty?
+  return false unless @enabled
+  if !(override = @split_mode_override).nil?
+    return override
+  end
+  is_tty = (@output.responds_to?(:tty?) && @output.tty?) || STDOUT.tty? || (@output.is_a?(IO::Memory) && ENV.has_key?("COLUMNS"))
+  Salamander::UI.terminal_width > @max_width + 50 && is_tty
+end
+
+private def ensure_turn_separator : Nil
+  return if @turn_separator_emitted
+  @turn_separator_emitted = true
+  return if @stream_history.empty?
+
+  term_w = Salamander::UI.terminal_width
+  box_w = Panel.clamp_width(term_w, @max_width)
+  right_w = Math.max(20, term_w - box_w - 3)
+  @stream_history << Salamander::UI.render_separator("Turn #{@turn_number}", right_w)
+  @turn_stream_start_idx = @stream_history.size
 end
 
 def append_right_pane(msg : String) : Nil
+  ensure_turn_separator
+  unless @stream_current.empty?
+    @stream_history << @stream_current
+    @stream_current = ""
+  end
   msg.lines.each do |l|
     @stream_history << l
   end
+  @turn_stream_start_idx = @stream_history.size
   enforce_history_limit
   if split_mode_active?
     render_dashboard(@last_active_file, @last_active_offset, @last_action_label)
@@ -92,6 +118,8 @@ def append_right_pane(msg : String) : Nil
 end
 
 def append_stream_text(chunk : String) : Nil
+  return if chunk.empty?
+  ensure_turn_separator
   chunk.each_char do |c|
     if c == '\n'
       @stream_history << @stream_current
@@ -110,7 +138,9 @@ private def enforce_history_limit : Nil
   term_h = Salamander::UI.terminal_height
   limit = Math.max(10, term_h - 2)
   if @stream_history.size > limit
-    @stream_history.shift(@stream_history.size - limit)
+    removed = @stream_history.size - limit
+    @stream_history.shift(removed)
+    @turn_stream_start_idx = Math.max(0, @turn_stream_start_idx - removed)
   end
 end
 
@@ -127,13 +157,23 @@ def display_msg(msg : String) : Nil
 end
 
     def reset_for_new_turn(user_prompt : String, previous_response : String? = nil) : Nil
+      unless @stream_current.empty?
+        @stream_history << @stream_current
+        @stream_current = ""
+      end
       @opened_files.clear
       @system_messages.clear
       @current_user_prompt = user_prompt
       @agent_thought = nil
       @last_agent_response = previous_response
       @active_subagent = nil
+      @last_active_file = nil
+      @last_active_offset = 1
+      @last_action_label = nil
+      @last_render = nil
       @turn_number += 1
+      @turn_separator_emitted = false
+      @turn_stream_start_idx = @stream_history.size
     end
 
     def record_file_open(path : String, content : String, offset : Int32? = nil, limit : Int32? = nil) : OpenedFile
@@ -348,31 +388,37 @@ end
   left_str = mem.to_s
 
   if split_mode_active?
-  right_w = term_w - box_w - 3
+  right_w = Math.max(20, term_w - box_w - 3)
   left_lines = left_str.lines
   
   right_lines = [] of String
   if format_right_pane
-  text_to_format = final_response || begin
-    t = @stream_history.join("\n")
-    t += "\n" + @stream_current unless @stream_current.empty?
-    t
+    ensure_turn_separator
+    text_to_format = final_response || begin
+      slice = @stream_history[@turn_stream_start_idx..]
+      t = slice.join("\n")
+      if !@stream_current.empty?
+        t = t.empty? ? @stream_current : "#{t}\n#{@stream_current}"
+      end
+      t
+    end
+    text_to_format = " " if text_to_format.empty?
+    formatted = Salamander::UI::MarkdownFormatter.format(text_to_format)
+    if @turn_stream_start_idx < @stream_history.size
+      @stream_history = @stream_history[0...@turn_stream_start_idx]
+    end
+    formatted.each_line do |line|
+      @stream_history << line
+    end
+    @stream_current = ""
+    enforce_history_limit
   end
-  text_to_format = " " if text_to_format.empty?
-  formatted = Salamander::UI::MarkdownFormatter.format(text_to_format)
-  formatted.each_line do |line|
+
+  @stream_history.each do |line|
     right_lines.concat(Panel.wrap_text(line, right_w))
   end
-  if right_lines.empty? && !formatted.empty?
-    right_lines << formatted
-  end
-  else
-    @stream_history.each do |line|
-       right_lines.concat(Panel.wrap_text(line, right_w))
-    end
-    if !@stream_current.empty?
-       right_lines.concat(Panel.wrap_text(@stream_current, right_w))
-    end
+  if !@stream_current.empty?
+    right_lines.concat(Panel.wrap_text(@stream_current, right_w))
   end
   
   disp_h = term_h - 1
@@ -400,7 +446,7 @@ end
     end
     @output.puts screen
     @output.flush
-    @last_render = screen
+    @last_render = "#{screen}\n"
   else
     if @output == STDOUT && STDOUT.tty?
       Salamander::UI.clear_screen

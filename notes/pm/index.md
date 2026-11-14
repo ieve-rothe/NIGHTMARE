@@ -16,6 +16,7 @@ This file tracks the status and priority of all development tickets for the `nig
 | [TKT-035](notes/pm/TKT-035-shell-command-prefix-approval-visibility-and-editing.md) | Shell Command Prefix Approval, Candidate Visibility, Inline Prefix Editing, and Pre-Approved Command Visibility | Execution Security & Tool Ergonomics | Resolved | High | 2026-10-10 |
 | [TKT-036](notes/pm/TKT-036-resilient-binary-and-utf8-tool-output-handling.md) | Resilient Binary and UTF-8 Tool Output Handling Across Mantle, Salamander, and Nightmare | Harness Stability & Error Resilience | Resolved | High | 2026-10-10 |
 | [TKT-038](notes/pm/TKT-038-live-tool-availability-quotas-and-session-token-caps.md) | Live Harness Tool Availability, Cascade Quotas, and Session Token Caps | Tooling & Resource Management | Resolved | High | 2026-10-26 |
+| [TKT-039](notes/pm/TKT-039-split-pane-turn-separator-and-overwrite-artifacts.md) | Split-Pane Multi-Turn Visual Separator and Cursor Repositioning Overwrite Fix | User Interface & Tooling | Resolved | Med | 2026-11-13 |
 ## Closed Tickets
 
 | Ticket ID | Title | Theme | Status | Priority | Last Updated |

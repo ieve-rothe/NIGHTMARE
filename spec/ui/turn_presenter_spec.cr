@@ -1,5 +1,6 @@
 require "../spec_helper"
 require "../../src/nightmare/ui/turn_presenter"
+require "../../src/nightmare/ui/stream_controller"
 require "../../src/nightmare/context/token_calibrator"
 
 describe Nightmare::UI::TurnPresenter do
@@ -350,6 +351,121 @@ describe Nightmare::UI::TurnPresenter do
     presenter.reset_for_new_turn("Next turn")
     presenter.system_messages.should be_empty
     presenter.opened_files.should be_empty
+  end
+
+  it "routes StreamController chunks through on_print in split mode and preserves separated multi-turn right-pane history" do
+    calibrator = Nightmare::Context::TokenEstimator.new
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(
+      calibrator: calibrator,
+      max_width: 105,
+      output: io
+    )
+    presenter.split_mode_override = true
+
+    stream_ctrl = Nightmare::UI::StreamController.new
+    on_print_chunks = [] of String
+    stream_ctrl.on_print = ->(s : String) {
+      on_print_chunks << s
+      presenter.append_stream_text(s)
+    }
+
+    with_env({"LINES" => "40", "COLUMNS" => "180"}) do
+      term_w = 180
+      box_w = Salamander::UI::Panel.clamp_width(term_w, 105)
+      right_w = term_w - box_w - 3
+
+      # --- Turn 1 ---
+      presenter.reset_for_new_turn("hie")
+      presenter.last_render.should be_nil
+      stream_ctrl.reset
+
+      stream_ctrl.process_chunk("Oh hey! Emma here. ")
+      stream_ctrl.process_chunk("<think>internal thought</think>")
+      stream_ctrl.process_chunk("*waves*\nWelcome!")
+      stream_ctrl.finish
+
+      on_print_chunks.join.should eq("Oh hey! Emma here. *waves*\nWelcome!")
+      stream_ctrl.thinking_text.should eq("internal thought")
+
+      # Before formatting on turn 1, raw text is shown without Turn 1 divider
+      raw_t1_render = presenter.last_render.not_nil!
+      raw_t1_render.ends_with?("\n").should be_true
+      Salamander::UI::Panel.strip_ansi(raw_t1_render).should contain("*waves*")
+      Salamander::UI::Panel.strip_ansi(raw_t1_render).should_not contain("Turn 1")
+
+      # Complete Turn 1 with Markdown formatting
+      io.clear
+      presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: stream_ctrl.visible_text)
+      t1_final = presenter.last_render.not_nil!
+      t1_final.should contain("\e[3mwaves\e[0m")
+      t1_final_clean = Salamander::UI::Panel.strip_ansi(t1_final)
+      t1_final_clean.should contain("NIGHTMARE REPL · TURN 1")
+      t1_final_clean.should contain("Oh hey! Emma here. waves")
+      t1_final_clean.should contain("Welcome!")
+
+      # --- Turn 2 ---
+      presenter.reset_for_new_turn("Hi friend. I'm Cam.", stream_ctrl.visible_text)
+      presenter.last_render.should be_nil
+      stream_ctrl.reset
+      io.clear
+
+      stream_ctrl.process_chunk("Oh wow, Cam! *spins*\nThis is exciting!")
+      stream_ctrl.finish
+
+      # During streaming of Turn 2: Turn 2 separator sized to right_w, raw *spins* below it, Turn 1 still above
+      t2_streaming = presenter.last_render.not_nil!
+      t2_streaming_clean = Salamander::UI::Panel.strip_ansi(t2_streaming)
+      t2_streaming_clean.should contain("NIGHTMARE REPL · TURN 2")
+      t2_streaming_clean.should_not contain("NIGHTMARE REPL · TURN 1")
+      t2_streaming_clean.should contain("Turn 2")
+      t2_streaming_clean.should contain("*spins*")
+      t2_streaming_clean.should contain("Oh hey! Emma here. waves")
+
+      # Verify separator line in stream_history has exact right_w visual width
+      sep_t2 = presenter.stream_history.find { |l| Salamander::UI::Panel.strip_ansi(l).includes?("Turn 2") }.not_nil!
+      Salamander::UI::Panel.visual_width(sep_t2).should eq(right_w)
+
+      # Intra-turn completion redraw emits clear_and_reposition with exact line count - 1
+      prev_lines = Salamander::UI.count_physical_lines(t2_streaming)
+      io.clear
+      presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: stream_ctrl.visible_text)
+      io.to_s.should start_with("\r\e[#{prev_lines - 1}A\e[J")
+
+      t2_final = presenter.last_render.not_nil!
+      t2_final.should contain("\e[3mspins\e[0m")
+      t2_final_clean = Salamander::UI::Panel.strip_ansi(t2_final)
+      t2_final_clean.should_not contain("*spins*")
+      t2_final_clean.should contain("Oh wow, Cam! spins")
+      t2_final_clean.should contain("This is exciting!")
+
+      # --- Turn 3 ---
+      presenter.reset_for_new_turn("Islands don't sing do they?", stream_ctrl.visible_text)
+      presenter.last_render.should be_nil
+      stream_ctrl.reset
+      io.clear
+
+      stream_ctrl.process_chunk("Oh, absolutely they do! *grins*")
+      stream_ctrl.finish
+      presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: stream_ctrl.visible_text)
+
+      t3_final_clean = Salamander::UI::Panel.strip_ansi(presenter.last_render.not_nil!)
+      t3_final_clean.should contain("NIGHTMARE REPL · TURN 3")
+      t3_final_clean.should_not contain("NIGHTMARE REPL · TURN 1")
+      t3_final_clean.should_not contain("NIGHTMARE REPL · TURN 2")
+
+      # Right pane preserves Turn 1, Turn 2 separator, Turn 2, Turn 3 separator, Turn 3 in order
+      idx1 = t3_final_clean.index("Oh hey! Emma here. waves").not_nil!
+      idx_sep2 = t3_final_clean.index("─── Turn 2").not_nil!
+      idx2 = t3_final_clean.index("Oh wow, Cam! spins").not_nil!
+      idx_sep3 = t3_final_clean.index("─── Turn 3").not_nil!
+      idx3 = t3_final_clean.index("Oh, absolutely they do! grins").not_nil!
+
+      idx1.should be < idx_sep2
+      idx_sep2.should be < idx2
+      idx2.should be < idx_sep3
+      idx_sep3.should be < idx3
+    end
   end
 end
 

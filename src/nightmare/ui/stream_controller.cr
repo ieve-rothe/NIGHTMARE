@@ -91,8 +91,7 @@ module Nightmare::UI
               break
             else
               if !@pending.empty?
-                print @pending
-                STDOUT.flush
+                @on_print.call(@pending)
                 @visible_buffer << @pending
                 @pending = ""
               end
