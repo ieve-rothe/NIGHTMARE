@@ -249,10 +249,78 @@ HELP
       end
     end
 
-    private def handle_add(path : String) : Nil
-      if path.empty?
-        puts "Usage: /add <path>"
+    private def handle_add(raw_args : String) : Nil
+      trimmed = raw_args.strip
+      if trimmed.empty?
+        puts "Usage: /add <path> [--head <N>] [--tail <N>] [--window] [--full]"
         return
+      end
+
+      tokens = tokenize_command_args(trimmed)
+      head_lines : Int32? = nil
+      tail_lines : Int32? = nil
+      use_window = false
+      auto_window = true
+      path_parts = [] of String
+
+      i = 0
+      while i < tokens.size
+        tok = tokens[i]
+        case tok
+        when "--window"
+          use_window = true
+        when "--full", "--no-window"
+          auto_window = false
+        when /^--head=(.+)$/
+          val = $1.to_i?
+          if val.nil? || val < 0
+            puts "Invalid value for --head: '#{$1}'. Expected a non-negative integer."
+            return
+          end
+          head_lines = val
+        when "--head"
+          i += 1
+          val = tokens[i]?.try(&.to_i?)
+          if val.nil? || val < 0
+            puts "Usage: --head <N> (non-negative integer)"
+            return
+          end
+          head_lines = val
+        when /^--tail=(.+)$/
+          val = $1.to_i?
+          if val.nil? || val < 0
+            puts "Invalid value for --tail: '#{$1}'. Expected a non-negative integer."
+            return
+          end
+          tail_lines = val
+        when "--tail"
+          i += 1
+          val = tokens[i]?.try(&.to_i?)
+          if val.nil? || val < 0
+            puts "Usage: --tail <N> (non-negative integer)"
+            return
+          end
+          tail_lines = val
+        else
+          path_parts << tok
+        end
+        i += 1
+      end
+
+      path = path_parts.join(" ").strip
+      if path.empty?
+        puts "Usage: /add <path> [--head <N>] [--tail <N>] [--window] [--full]"
+        return
+      end
+
+      if use_window
+        head_lines = @env.settings.pinned_head_lines if head_lines.nil?
+        tail_lines = @env.settings.pinned_tail_lines if tail_lines.nil?
+      end
+
+      unless auto_window
+        head_lines = nil
+        tail_lines = nil
       end
 
       begin
@@ -260,10 +328,17 @@ HELP
           path: path,
           guard: @guard,
           calibrator: @calibrator,
+          head_lines: head_lines,
+          tail_lines: tail_lines,
           hardmax: @store.hardmax,
-          budget_ratio: @env.settings.pinned_budget_ratio
+          budget_ratio: @env.settings.pinned_budget_ratio,
+          auto_window: auto_window
         )
-        puts "Pinned #{file.path} (estimated #{file.cached_tokens} tokens)."
+        if file.head_lines || file.tail_lines
+          puts "Pinned #{file.path} [head: #{file.head_lines || 0}, tail: #{file.tail_lines || 0} lines] (estimated #{file.cached_tokens} tokens)."
+        else
+          puts "Pinned #{file.path} (estimated #{file.cached_tokens} tokens)."
+        end
       rescue ex : SecurityError
         puts "SecurityError: #{ex.message}"
       rescue ex : Nightmare::Error
@@ -271,6 +346,53 @@ HELP
       rescue ex
         puts "Failed to pin file: #{ex.message}"
       end
+    end
+
+    private def tokenize_command_args(raw : String) : Array(String)
+      tokens = [] of String
+      current = String::Builder.new
+      in_single = false
+      in_double = false
+      has_token = false
+
+      raw.each_char do |ch|
+        if in_single
+          if ch == '\''
+            in_single = false
+          else
+            current << ch
+          end
+          has_token = true
+        elsif in_double
+          if ch == '"'
+            in_double = false
+          else
+            current << ch
+          end
+          has_token = true
+        else
+          case ch
+          when '\''
+            in_single = true
+            has_token = true
+          when '"'
+            in_double = true
+            has_token = true
+          when ' ', '\t'
+            if has_token
+              tokens << current.to_s
+              current = String::Builder.new
+              has_token = false
+            end
+          else
+            current << ch
+            has_token = true
+          end
+        end
+      end
+
+      tokens << current.to_s if has_token
+      tokens
     end
 
     private def handle_save(path : String) : Nil

@@ -58,9 +58,15 @@ module Nightmare::SystemPrompt
     decision about what to do.
 
   PERSIST
-  - There is no automatic memory. Before your last call of a turn, append
-    to PROGRESS.md: what changed, what's next, open questions.
-  - Near the limit, spend the final call on PROGRESS.md, not one more read.
+  - There is no automatic memory. Maintain PROGRESS.md as a concise, structured
+    state board (< 40 lines).
+  - Never append an unbounded chronological log. Instead, update sections in-place:
+    ## Objective
+    ## Current State & Recent Changes
+    ## Next Steps
+    ## Open Questions / Risks
+  - Overwrite or consolidate obsolete debugging steps so the file remains compact.
+  - Near the limit, spend the final call updating PROGRESS.md, not one more read.
 
   Be concise, direct, factual. Report what you did, not what you plan to do.
   MARKDOWN

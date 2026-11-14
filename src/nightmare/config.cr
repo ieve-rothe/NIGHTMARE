@@ -40,6 +40,15 @@ module Nightmare
       "*.ndjson"
     ]
     BULK_DATA_MAX_LINES_DEFAULT = 50
+    PINNED_WINDOW_PATTERNS = [
+      "PROGRESS.md",
+      "*.jsonl",
+      "*.log",
+      "*.trace",
+      "*.ndjson"
+    ]
+    PINNED_HEAD_LINES_DEFAULT = 15
+    PINNED_TAIL_LINES_DEFAULT = 45
     DEFAULT_LIST_FILES_MAX_RESULTS = 40
     DEFAULT_MODEL = "qwen2.5-coder:7b"
     DEFAULT_KEEP_ALIVE = "15m"

@@ -91,4 +91,99 @@ describe Nightmare::Context::PinnedFiles do
       end
     end
   end
+
+  it "windows content preserving head and tail lines when exceeding threshold" do
+    with_temp_dir do |root|
+      env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+      guard = Nightmare::Tools::Guard.new(env)
+
+      lines = (1..20).map { |i| "line #{i}" }
+      File.write(File.join(root, "app.log"), lines.join("\n"))
+
+      # Windowed: head 3, tail 4 => 13 lines elided
+      pin = Nightmare::Context::PinnedFile.new("app.log", head_lines: 3, tail_lines: 4)
+      content = pin.read_content(guard)
+      content.should eq("line 1\nline 2\nline 3\n[... 13 lines elided ...]\nline 17\nline 18\nline 19\nline 20")
+
+      # When file size <= head_lines + tail_lines, no elision occurs
+      pin_exact = Nightmare::Context::PinnedFile.new("app.log", head_lines: 10, tail_lines: 10)
+      pin_exact.read_content(guard).should eq(lines.join("\n"))
+    end
+  end
+
+  it "supports head-only and tail-only windowing" do
+    with_temp_dir do |root|
+      env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+      guard = Nightmare::Tools::Guard.new(env)
+
+      lines = (1..10).map { |i| "entry #{i}" }
+      File.write(File.join(root, "stream.log"), lines.join("\n"))
+
+      pin_head = Nightmare::Context::PinnedFile.new("stream.log", head_lines: 3, tail_lines: nil)
+      pin_head.read_content(guard).should eq("entry 1\nentry 2\nentry 3\n[... 7 lines elided ...]")
+
+      pin_tail = Nightmare::Context::PinnedFile.new("stream.log", head_lines: nil, tail_lines: 3)
+      pin_tail.read_content(guard).should eq("[... 7 lines elided ...]\nentry 8\nentry 9\nentry 10")
+    end
+  end
+
+  it "dynamically clamps pinned scratchpad/log files as they grow on disk" do
+    with_temp_dir do |root|
+      env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+      guard = Nightmare::Tools::Guard.new(env)
+      calibrator = Nightmare::Context::TokenEstimator.new(3.5)
+      pinned = Nightmare::Context::PinnedFiles.new
+
+      log_path = File.join(root, "PROGRESS.md")
+      initial_lines = ["# Objective", "Keep tests green", "## Updates", "Step 1"]
+      File.write(log_path, initial_lines.join("\n"))
+
+      pinned.add("PROGRESS.md", guard, calibrator, head_lines: 2, tail_lines: 2)
+      pinned.render_pinned_block(guard).not_nil!.should_not contain("lines elided")
+
+      # Append 100 more lines on disk after pinning
+      expanded = initial_lines + (2..101).map { |i| "Step #{i}" }
+      File.write(log_path, expanded.join("\n"))
+
+      rendered = pinned.render_pinned_block(guard).not_nil!
+      rendered.should contain("# Objective\nKeep tests green")
+      rendered.should contain("[... 100 lines elided ...]")
+      rendered.should contain("Step 100\nStep 101")
+      rendered.should_not contain("Step 50\n")
+    end
+  end
+
+  it "auto-windows files matching pinned_window_patterns unless auto_window is false" do
+    with_temp_dir do |root|
+      env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+      guard = Nightmare::Tools::Guard.new(env)
+      calibrator = Nightmare::Context::TokenEstimator.new(3.5)
+
+      lines = (1..100).map { |i| "log line #{i}" }
+      File.write(File.join(root, "PROGRESS.md"), lines.join("\n"))
+      File.write(File.join(root, "server.log"), lines.join("\n"))
+      File.write(File.join(root, "README.md"), lines.join("\n"))
+
+      pinned = Nightmare::Context::PinnedFiles.new
+      progress_pin = pinned.add("PROGRESS.md", guard, calibrator)
+      progress_pin.head_lines.should eq(Nightmare::Config::PINNED_HEAD_LINES_DEFAULT)
+      progress_pin.tail_lines.should eq(Nightmare::Config::PINNED_TAIL_LINES_DEFAULT)
+      progress_pin.read_content(guard).should contain("[... 40 lines elided ...]")
+
+      log_pin = pinned.add("server.log", guard, calibrator)
+      log_pin.head_lines.should eq(Nightmare::Config::PINNED_HEAD_LINES_DEFAULT)
+      log_pin.tail_lines.should eq(Nightmare::Config::PINNED_TAIL_LINES_DEFAULT)
+
+      readme_pin = pinned.add("README.md", guard, calibrator)
+      readme_pin.head_lines.should be_nil
+      readme_pin.tail_lines.should be_nil
+      readme_pin.read_content(guard).should_not contain("lines elided")
+
+      # Opt out of auto_window
+      full_pin = pinned.add("PROGRESS.md", guard, calibrator, auto_window: false)
+      full_pin.head_lines.should be_nil
+      full_pin.tail_lines.should be_nil
+      full_pin.read_content(guard).should_not contain("lines elided")
+    end
+  end
 end

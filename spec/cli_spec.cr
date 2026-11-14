@@ -223,7 +223,7 @@ describe Nightmare::CLI do
         output.should contain("Disabled tool(s): run_command")
         output.should contain("Session token hardmax set to 9500")
         output.should contain("=== Session Token Budget & Context Window ===")
-        output.should contain("Active Context Tokens:  636 / 9500")
+        output.should contain("Active Context Tokens:  704 / 9500")
         output.should contain("(Session Override)")
         output.should contain("Max 3/turn (0 used) → Cascade: run_command")
         output.should contain("run_command        \e[31mDISABLED\e[0m")

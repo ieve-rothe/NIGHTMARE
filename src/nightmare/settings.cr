@@ -36,6 +36,9 @@ module Nightmare
     property bulk_data_patterns : Array(String) = Nightmare::Config::BULK_DATA_PATTERNS
     property bulk_data_max_lines : Int32 = Nightmare::Config::BULK_DATA_MAX_LINES_DEFAULT
     property pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO
+    property pinned_window_patterns : Array(String) = Nightmare::Config::PINNED_WINDOW_PATTERNS
+    property pinned_head_lines : Int32 = Nightmare::Config::PINNED_HEAD_LINES_DEFAULT
+    property pinned_tail_lines : Int32 = Nightmare::Config::PINNED_TAIL_LINES_DEFAULT
     property shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO
     property shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS
     property shed_shell_keep_chars : Int32 = Nightmare::Config::SHED_SHELL_KEEP_CHARS
@@ -84,6 +87,9 @@ module Nightmare
       @bulk_data_patterns : Array(String) = Nightmare::Config::BULK_DATA_PATTERNS,
       @bulk_data_max_lines : Int32 = Nightmare::Config::BULK_DATA_MAX_LINES_DEFAULT,
       @pinned_budget_ratio : Float64 = Nightmare::Config::PINNED_BUDGET_RATIO,
+      @pinned_window_patterns : Array(String) = Nightmare::Config::PINNED_WINDOW_PATTERNS,
+      @pinned_head_lines : Int32 = Nightmare::Config::PINNED_HEAD_LINES_DEFAULT,
+      @pinned_tail_lines : Int32 = Nightmare::Config::PINNED_TAIL_LINES_DEFAULT,
       @shed_trigger_ratio : Float64 = Nightmare::Config::SHED_TRIGGER_RATIO,
       @shed_keep_chars : Int32 = Nightmare::Config::SHED_KEEP_CHARS,
       @shed_shell_keep_chars : Int32 = Nightmare::Config::SHED_SHELL_KEEP_CHARS,
@@ -115,13 +121,13 @@ module Nightmare
       global_config_file = File.join(global_config_dir, "config.json")
 
       if repo_config_file && File.exists?(repo_config_file)
-        load_and_patch(repo_config_file)
+        load_and_patch(repo_config_file, write_back: ensure_dirs)
       elsif repo_config_alt && File.exists?(repo_config_alt)
-        load_and_patch(repo_config_alt)
+        load_and_patch(repo_config_alt, write_back: ensure_dirs)
       elsif File.exists?(ws_config_file)
-        load_and_patch(ws_config_file)
+        load_and_patch(ws_config_file, write_back: ensure_dirs)
       elsif File.exists?(global_config_file)
-        load_and_patch(global_config_file)
+        load_and_patch(global_config_file, write_back: ensure_dirs)
       else
         settings = Settings.new
         if ensure_dirs
@@ -134,7 +140,7 @@ module Nightmare
     end
 
     # Loads a configuration file, verifying and patching schema if missing keys or mismatch
-    def self.load_and_patch(file_path : String) : Settings
+    def self.load_and_patch(file_path : String, write_back : Bool = true) : Settings
       expected_hash = JSON.parse(Settings.new.to_json).as_h
       begin
         raw_content = File.read(file_path)
@@ -143,7 +149,7 @@ module Nightmare
           current_data["writable_directories"] = w
         end
       rescue
-        return give_up_patching_config(file_path)
+        return write_back ? give_up_patching_config(file_path) : Settings.new
       end
 
       patched_data = expected_hash.clone
@@ -152,13 +158,17 @@ module Nightmare
       begin
         settings = Settings.from_json(patched_data.to_json)
         # If schema had missing keys or mismatched values that were repaired, rewrite with patched keys
-        if current_data.keys.sort != patched_data.keys.sort
-          File.write(file_path, settings.to_pretty_json)
-          File.chmod(file_path, 0o600)
+        if write_back && current_data.keys.sort != patched_data.keys.sort
+          begin
+            File.write(file_path, settings.to_pretty_json)
+            File.chmod(file_path, 0o600)
+          rescue File::Error
+            # Ignore write-back errors on read-only filesystems
+          end
         end
         settings
       rescue ex : JSON::SerializableError
-        give_up_patching_config(file_path)
+        write_back ? give_up_patching_config(file_path) : Settings.new
       end
     end
 

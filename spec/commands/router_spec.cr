@@ -853,4 +853,52 @@ describe Nightmare::Commands::Router do
       stdout.to_s.should contain("restored to configured default")
     end
   end
+
+  describe "/add windowing options" do
+    it "supports --head, --tail, auto-windowing on logs/PROGRESS.md, and --full" do
+      with_temp_dir do |root|
+        lines = (1..100).map { |i| "line #{i}" }.join("\n")
+        File.write(File.join(root, "PROGRESS.md"), lines)
+        File.write(File.join(root, "notes.txt"), lines)
+
+        env = Nightmare::Workspace::Environment.new(root_path: root, ensure_dirs: false)
+        stdout = IO::Memory.new
+        router = Nightmare::Commands::Router.new(
+          store: Nightmare::Context::SlidingStore.new,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(File.join(root, "state"), enabled: false),
+          current_prompt: "Test",
+          current_model: "test-model",
+          stdout: stdout
+        )
+
+        # Explicit --head and --tail on non-pattern file
+        stdout.clear
+        handled, _ = router.handle("/add notes.txt --head 3 --tail 5")
+        handled.should be_true
+        stdout.to_s.should contain("Pinned notes.txt [head: 3, tail: 5 lines]")
+        notes_pin = router.pinned_files.files.find { |f| f.path == "notes.txt" }.not_nil!
+        notes_pin.read_content(router.guard).should contain("[... 92 lines elided ...]")
+
+        # Auto-windowing on PROGRESS.md
+        stdout.clear
+        handled, _ = router.handle("/add PROGRESS.md")
+        handled.should be_true
+        stdout.to_s.should contain("Pinned PROGRESS.md [head: 15, tail: 45 lines]")
+        prog_pin = router.pinned_files.files.find { |f| f.path == "PROGRESS.md" }.not_nil!
+        prog_pin.read_content(router.guard).should contain("[... 40 lines elided ...]")
+
+        # Opt out with --full
+        stdout.clear
+        handled, _ = router.handle("/add PROGRESS.md --full")
+        handled.should be_true
+        stdout.to_s.should contain("Pinned PROGRESS.md (estimated")
+        full_pin = router.pinned_files.files.find { |f| f.path == "PROGRESS.md" }.not_nil!
+        full_pin.read_content(router.guard).should_not contain("lines elided")
+      end
+    end
+  end
 end

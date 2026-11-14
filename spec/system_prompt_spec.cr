@@ -14,6 +14,10 @@ describe Nightmare::SystemPrompt do
             result.text.should eq(Nightmare::SystemPrompt::DEFAULT_PERSONA)
             result.text.should contain("You are an execution agent operating in the current working directory.")
             result.text.should contain("Prefer replace_in_file. Use whole-file writes only for new files.")
+            result.text.should contain("## Objective")
+            result.text.should contain("## Current State & Recent Changes")
+            result.text.should contain("## Next Steps")
+            result.text.should contain("## Open Questions / Risks")
 
             # Direct property access (.text and .source)
             result2 = Nightmare::SystemPrompt::Resolver.resolve_with_source(env)

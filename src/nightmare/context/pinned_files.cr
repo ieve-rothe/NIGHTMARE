@@ -11,10 +11,18 @@ module Nightmare::Context
     getter path : String                     # workspace-relative, as displayed
     getter slice_start : Int32?              # 1-based, inclusive
     getter slice_end : Int32?                # 1-based, inclusive
+    getter head_lines : Int32?
+    getter tail_lines : Int32?
     property cached_mtime : Time?
     property cached_tokens : Int32?
 
-    def initialize(@path : String, @slice_start : Int32? = nil, @slice_end : Int32? = nil)
+    def initialize(
+      @path : String,
+      @slice_start : Int32? = nil,
+      @slice_end : Int32? = nil,
+      @head_lines : Int32? = nil,
+      @tail_lines : Int32? = nil
+    )
     end
 
     # Root containment belongs to Tools::Guard.resolve_read (§4.1), which
@@ -23,11 +31,32 @@ module Nightmare::Context
       full = guard.resolve_read(@path)
       lines = File.read_lines(full)
       s, e = @slice_start, @slice_end
-      return lines.join("\n") if s.nil? || e.nil?
-      lo = Math.max(s - 1, 0)
-      hi = Math.min(e - 1, lines.size - 1)
-      return "" if lo > hi                   # clamp; never raise on a stale slice
-      lines[lo..hi].join("\n")
+      if !s.nil? && !e.nil?
+        lo = Math.max(s - 1, 0)
+        hi = Math.min(e - 1, lines.size - 1)
+        return "" if lo > hi                   # clamp; never raise on a stale slice
+        lines = lines[lo..hi]
+      end
+
+      h = @head_lines ? Math.max(0, @head_lines.not_nil!) : 0
+      t = @tail_lines ? Math.max(0, @tail_lines.not_nil!) : 0
+      if (h > 0 || t > 0) && lines.size > (h + t)
+        elided = lines.size - h - t
+        marker = "[... #{elided} lines elided ...]"
+        if h > 0 && t > 0
+          head_part = lines[0...h].join("\n")
+          tail_part = lines[(lines.size - t)...lines.size].join("\n")
+          return "#{head_part}\n#{marker}\n#{tail_part}"
+        elsif h > 0
+          head_part = lines[0...h].join("\n")
+          return "#{head_part}\n#{marker}"
+        else
+          tail_part = lines[(lines.size - t)...lines.size].join("\n")
+          return "#{marker}\n#{tail_part}"
+        end
+      end
+
+      lines.join("\n")
     end
   end
 
@@ -38,16 +67,38 @@ module Nightmare::Context
       @files = [] of PinnedFile
     end
 
+    def self.windowed_file?(path : String, patterns : Array(String)) : Bool
+      clean = path.lchop("./")
+      basename = File.basename(clean)
+      patterns.any? do |pattern|
+        File.match?(pattern, clean) || File.match?(pattern, basename)
+      end
+    end
+
     def add(
       path : String,
       guard : Tools::Guard,
       calibrator : TokenEstimator,
       slice_start : Int32? = nil,
       slice_end : Int32? = nil,
+      head_lines : Int32? = nil,
+      tail_lines : Int32? = nil,
       hardmax : Int32 = Config::TOKEN_HARDMAX,
-      budget_ratio : Float64 = Config::PINNED_BUDGET_RATIO
+      budget_ratio : Float64 = Config::PINNED_BUDGET_RATIO,
+      auto_window : Bool = true
     ) : PinnedFile
-      candidate = PinnedFile.new(path, slice_start, slice_end)
+      effective_head = head_lines
+      effective_tail = tail_lines
+
+      if auto_window && slice_start.nil? && slice_end.nil? && effective_head.nil? && effective_tail.nil?
+        settings = guard.env.settings
+        if PinnedFiles.windowed_file?(path, settings.pinned_window_patterns)
+          effective_head = settings.pinned_head_lines
+          effective_tail = settings.pinned_tail_lines
+        end
+      end
+
+      candidate = PinnedFile.new(path, slice_start, slice_end, effective_head, effective_tail)
       content = candidate.read_content(guard)
       candidate_tokens = calibrator.estimate(content.size)
       candidate.cached_tokens = candidate_tokens
