@@ -77,6 +77,9 @@ module Nightmare
         when "user"
           io.puts "### User"
           io.puts msg.content
+          if (imgs = msg.images) && !imgs.empty?
+            io.puts "*(Attached images: #{imgs.size})*"
+          end
           io.puts ""
         when "assistant"
           io.puts "### Assistant"

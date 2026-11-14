@@ -14,6 +14,8 @@ require "../harness/subagent_runner"
 require "../config"
 require "../skills"
 require "../tools/policy"
+require "../ui/clipboard"
+require "../ui/turn_presenter"
 require "colorize"
 
 module Nightmare::Commands
@@ -35,6 +37,8 @@ module Nightmare::Commands
     property pacer : Nightmare::Plan::Pacer
     property active_orchestrator : Nightmare::Plan::Orchestrator? = nil
     property last_plan_run : Nightmare::Plan::PlanRun? = nil
+    property pending_images : Array(Nightmare::UI::PendingImage) = [] of Nightmare::UI::PendingImage
+    property turn_presenter : UI::TurnPresenter? = nil
 
     getter stdin : IO
     getter stdout : IO
@@ -57,6 +61,7 @@ module Nightmare::Commands
       skills_manager : Skills::SkillManager? = nil,
       allowlist : Tools::Allowlist? = nil,
       tool_policy : Tools::Policy? = nil,
+      @turn_presenter : UI::TurnPresenter? = nil,
     )
       @skills_manager = skills_manager || Skills::SkillManager.new(@env.repo_skills_dir, @env.global_skills_dir)
       @allowlist = allowlist || Tools::Allowlist.new(@env.allowlist_path)
@@ -96,10 +101,12 @@ module Nightmare::Commands
         {true, nil}
       when "/clear"
         @store.clear
+        @turn_presenter.try(&.clear)
         clear_screen
         puts "Conversation history cleared."
         {true, nil}
       when "/cls"
+        @turn_presenter.try { |tp| tp.last_render = nil }
         clear_screen
         {true, nil}
       when "/drop", "/rm"
@@ -132,6 +139,9 @@ module Nightmare::Commands
       when "/paste"
         text = handle_paste
         {true, text}
+      when "/clip", "/img"
+        handle_clip(args)
+        {true, nil}
       when "/plan"
         handle_plan(args)
         {true, nil}
@@ -166,7 +176,7 @@ module Nightmare::Commands
       end
     end
 
-    ALL_COMMANDS = %w(/help /clear /cls /drop /rm /add /save /prompt /review /recover /thinking /print_last /last /model /paste /plan /mode /theme /skill /allowlist /approvals /tools /tokens /budget /exit /quit)
+    ALL_COMMANDS = %w(/help /clear /cls /drop /rm /add /save /prompt /review /recover /thinking /print_last /last /model /paste /clip /img /plan /mode /theme /skill /allowlist /approvals /tools /tokens /budget /exit /quit)
 
     private def clear_screen : Nil
       @stdout.print "\e[2J\e[H"
@@ -207,6 +217,7 @@ Available Slash Commands:
   /theme [name]    Switch theme (cupertino, apple, cyberpunk, outrun, phosphor, classic)
   /model [name]    Inspect or change the active LLM model
   /paste           Enter multi-line input paste mode (or """)
+  /clip [opt]      Capture clipboard image or attach image file (/img [path|list|clear])
   /exit            Exit the session
 HELP
     end
@@ -1008,6 +1019,41 @@ HELP
       else
         @stdout.puts " ↳ Text captured. Processing...".colorize(:dark_gray)
         joined
+      end
+    end
+
+    private def handle_clip(args : String) : Nil
+      trimmed = args.strip
+      sub = trimmed.downcase
+
+      case sub
+      when "", "capture"
+        if img = Nightmare::UI::Clipboard.capture_image
+          @pending_images << img
+          puts " ↳ Captured [Image ##{@pending_images.size}: #{img.label} (#{img.mime}, #{Nightmare::UI::Clipboard.format_bytes(img.size_bytes)})] — staged for next message."
+        else
+          puts "No image found on system clipboard (or clipboard utility wl-paste/xclip unavailable). Usage: /clip [path | list | clear]"
+        end
+      when "list"
+        if @pending_images.empty?
+          puts "No images currently staged."
+        else
+          puts "Staged images (#{@pending_images.size}):"
+          @pending_images.each_with_index do |img, idx|
+            puts "  #{idx + 1}. #{img.label} (#{img.mime}, #{Nightmare::UI::Clipboard.format_bytes(img.size_bytes)})"
+          end
+        end
+      when "clear"
+        @pending_images.clear
+        puts "Cleared staged images."
+      else
+        begin
+          img = Nightmare::UI::Clipboard.load_file(trimmed, @guard)
+          @pending_images << img
+          puts " ↳ Attached [Image ##{@pending_images.size}: #{img.label} (#{img.mime}, #{Nightmare::UI::Clipboard.format_bytes(img.size_bytes)})] — staged for next message."
+        rescue ex : Nightmare::Error | SecurityError | File::Error
+          puts "Error loading image '#{trimmed}': #{ex.message}"
+        end
       end
     end
 

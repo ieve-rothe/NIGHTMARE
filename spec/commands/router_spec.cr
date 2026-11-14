@@ -901,4 +901,63 @@ describe Nightmare::Commands::Router do
       end
     end
   end
+
+  describe "/clip and /img multimodal staging commands" do
+    it "captures clipboard images, attaches image files, lists, and clears staged images" do
+      with_temp_dir do |root|
+        png_bytes = Bytes[0x89_u8, 0x50_u8, 0x4E_u8, 0x47_u8, 0x0D_u8, 0x0A_u8, 0x1A_u8, 0x0A_u8]
+        File.write(File.join(root, "screen.png"), png_bytes)
+
+        env = Nightmare::Workspace::Environment.new(root_path: root, ensure_dirs: false)
+        stdout = IO::Memory.new
+        router = Nightmare::Commands::Router.new(
+          store: Nightmare::Context::SlidingStore.new,
+          pinned_files: Nightmare::Context::PinnedFiles.new,
+          calibrator: Nightmare::Context::TokenEstimator.new(3.5),
+          guard: Nightmare::Tools::Guard.new(env),
+          env: env,
+          transcript: Nightmare::Transcript.new(File.join(root, "state"), enabled: false),
+          current_prompt: "Test",
+          current_model: "test-model",
+          stdout: stdout
+        )
+
+        clip_bytes = Bytes[0x89_u8, 0x50_u8, 0x4E_u8, 0x47_u8, 0x0D_u8, 0x0A_u8, 0x1A_u8, 0x0A_u8, 0x42_u8]
+        begin
+          Nightmare::UI::Clipboard.test_image_provider = -> : Tuple(Bytes, String)? { {clip_bytes, "image/png"} }
+
+          stdout.clear
+          handled, prompt_override = router.handle("/clip")
+          handled.should be_true
+          prompt_override.should be_nil
+          router.pending_images.size.should eq(1)
+          router.pending_images[0].label.should eq("clipboard")
+          router.pending_images[0].mime.should eq("image/png")
+          stdout.to_s.should contain("Captured [Image #1: clipboard (image/png, 9 B)]")
+
+          stdout.clear
+          handled, _ = router.handle("/img screen.png")
+          handled.should be_true
+          router.pending_images.size.should eq(2)
+          router.pending_images[1].label.should eq("screen.png")
+          router.pending_images[1].base64.should eq(Base64.strict_encode(png_bytes))
+          stdout.to_s.should contain("Attached [Image #2: screen.png (image/png, 8 B)]")
+
+          stdout.clear
+          router.handle("/clip list")
+          list_out = stdout.to_s
+          list_out.should contain("Staged images (2):")
+          list_out.should contain("1. clipboard")
+          list_out.should contain("2. screen.png")
+
+          stdout.clear
+          router.handle("/clip clear")
+          router.pending_images.should be_empty
+          stdout.to_s.should contain("Cleared staged images.")
+        ensure
+          Nightmare::UI::Clipboard.test_image_provider = nil
+        end
+      end
+    end
+  end
 end

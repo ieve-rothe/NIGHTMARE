@@ -259,5 +259,108 @@ describe Nightmare::CLI do
         stderr.to_s.should be_empty
       end
     end
+
+    it "extracts @image.png inline attachments via Clipboard.extract_inline_images" do
+      with_temp_dir do |dir|
+        png_bytes = Bytes[0x89_u8, 0x50_u8, 0x4E_u8, 0x47_u8, 0x0D_u8, 0x0A_u8, 0x1A_u8, 0x0A_u8]
+        File.write(File.join(dir, "shot.png"), png_bytes)
+        File.write(File.join(dir, "my diagram.png"), png_bytes)
+        Dir.mkdir_p(File.join(dir, "src"))
+        File.write(File.join(dir, "src", "main.cr"), "puts 1")
+
+        env = Nightmare::Workspace::Environment.new(dir, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+
+        prompt = %(Inspect @shot.png and @"my diagram.png" alongside @src/main.cr)
+        cleaned, images = Nightmare::UI::Clipboard.extract_inline_images(prompt, guard)
+
+        images.size.should eq(2)
+        images[0].label.should eq("shot.png")
+        images[0].mime.should eq("image/png")
+        images[1].label.should eq("my diagram.png")
+        cleaned.should eq("Inspect [Image: shot.png] and [Image: my diagram.png] alongside @src/main.cr")
+      end
+    end
+
+    it "handles Ctrl+V clipboard image capture and bracketed paste file attachment in InputReader" do
+      # Ctrl+V image capture followed by typed text
+      stdin_ctrlv = IO::Memory.new("\u0016look at this\n")
+      stdout_ctrlv = IO::Memory.new
+      line1 = Nightmare::UI::InputReader.read_line(
+        stdin: stdin_ctrlv,
+        stdout: stdout_ctrlv,
+        on_clipboard_paste: -> : String? { "[Image #1: clipboard]" },
+        simulate_raw: true
+      )
+      line1.should eq("look at this")
+      out1 = stdout_ctrlv.to_s
+      out1.should contain(Nightmare::UI::InputReader::BRACKET_PASTE_ENABLE)
+      out1.should contain(Nightmare::UI::InputReader::BRACKET_PASTE_DISABLE)
+      out1.should contain("[Image #1: clipboard]")
+
+      # Ctrl+V falls back to text paste when clipboard has no image
+      stdin_fallback = IO::Memory.new("\u0016 suffix\n")
+      stdout_fallback = IO::Memory.new
+      line2 = Nightmare::UI::InputReader.read_line(
+        stdin: stdin_fallback,
+        stdout: stdout_fallback,
+        on_clipboard_paste: -> { nil.as(String?) },
+        on_text_paste: -> { "pasted text".as(String?) },
+        simulate_raw: true
+      )
+      line2.should eq("pasted text suffix")
+
+      # Bracketed paste of image file path triggers on_file_paste; regular text inserts into buffer
+      stdin_bp = IO::Memory.new("\e[200~/tmp/demo.png\e[201~\e[200~ describe it\e[201~\n")
+      stdout_bp = IO::Memory.new
+      captured_files = [] of String
+      line3 = Nightmare::UI::InputReader.read_line(
+        stdin: stdin_bp,
+        stdout: stdout_bp,
+        on_file_paste: ->(payload : String) {
+          if payload.ends_with?(".png")
+            captured_files << payload
+            "[Image #1: demo.png]".as(String?)
+          else
+            nil.as(String?)
+          end
+        },
+        simulate_raw: true
+      )
+      captured_files.should eq(["/tmp/demo.png"])
+      line3.should eq(" describe it")
+      stdout_bp.to_s.should contain("[Image #1: demo.png]")
+    end
+
+    it "stages and clears images cleanly through CLI interactive session (/img, /clip)" do
+      with_temp_dir do |dir|
+        png_bytes = Bytes[0x89_u8, 0x50_u8, 0x4E_u8, 0x47_u8, 0x0D_u8, 0x0A_u8, 0x1A_u8, 0x0A_u8]
+        File.write(File.join(dir, "screen.png"), png_bytes)
+
+        stdin = IO::Memory.new([
+          "/img screen.png",
+          "/clip list",
+          "/clip clear",
+          "/exit",
+        ].join("\n") + "\n")
+        stdout = IO::Memory.new
+        stderr = IO::Memory.new
+
+        status = Nightmare::CLI.execute(
+          args: ["--no-log", "--no-markdown", dir],
+          stdin: stdin,
+          stdout: stdout,
+          stderr: stderr
+        )
+
+        status.should eq(0)
+        output = stdout.to_s
+        output.should contain("Attached [Image #1: screen.png (image/png, 8 B)]")
+        output.should contain("[🖼 ×1]")
+        output.should contain("Staged images (1):")
+        output.should contain("Cleared staged images.")
+        stderr.to_s.should be_empty
+      end
+    end
   end
 end

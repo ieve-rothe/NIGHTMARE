@@ -176,6 +176,24 @@ end
       @turn_stream_start_idx = @stream_history.size
     end
 
+    def clear : Nil
+      @opened_files.clear
+      @system_messages.clear
+      @stream_history.clear
+      @stream_current = ""
+      @current_user_prompt = ""
+      @agent_thought = nil
+      @last_agent_response = nil
+      @active_subagent = nil
+      @last_active_file = nil
+      @last_active_offset = 1
+      @last_action_label = nil
+      @last_render = nil
+      @turn_number = 0
+      @turn_separator_emitted = false
+      @turn_stream_start_idx = 0
+    end
+
     def record_file_open(path : String, content : String, offset : Int32? = nil, limit : Int32? = nil) : OpenedFile
       raw_lines = content.lines
       lines_count = raw_lines.size
@@ -262,6 +280,32 @@ end
           display_msg "  #{Theme.border_danger}✗#{Theme::RESET} #{tag} #{Theme.filename}#{path}#{Theme::RESET} #{Theme.meta_dim}· #{result_str.strip}#{Theme::RESET}"
           @output.flush
           return
+        elsif result_str.starts_with?("{") && result_str.includes?("\"image_loaded\"")
+          if img_data = (JSON.parse(result_str).as_h? rescue nil)
+            if img_data["status"]?.try(&.as_s?) == "image_loaded"
+              img_path = img_data["path"]?.try(&.as_s?) || path
+              mime = img_data["mime"]?.try(&.as_s?) || "image"
+              sz = img_data["size_bytes"]?.try(&.as_i64?) || 0_i64
+              opened = OpenedFile.new(
+                path: img_path,
+                size_bytes: sz,
+                lines: 1,
+                tokens: Mantle::Storage::Shedder::IMAGE_TOKEN_ESTIMATE,
+                read_range: "image (#{mime})",
+                content: "[Image loaded: #{img_path} (#{mime}, #{format_bytes(sz)})]"
+              )
+              @opened_files << opened
+              @last_active_file = opened
+              @last_active_offset = 1
+              if collapsed_mode? || split_mode_active?
+                render_dashboard(active_file: opened, active_offset: 1, action_label: "read_file('#{img_path}')")
+              else
+                display_msg "  #{Theme.success_icon}🖼#{Theme::RESET} #{Theme.bracket_tag("READ", "IMAGE", Theme.title)} #{Theme.filename}#{img_path}#{Theme::RESET} #{Theme.meta_dim}(#{mime} · #{format_bytes(sz)})#{Theme::RESET}"
+                @output.flush
+              end
+              return
+            end
+          end
         end
 
         opened = record_file_open(path, result_str, offset, limit)

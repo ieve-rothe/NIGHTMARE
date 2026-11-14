@@ -26,6 +26,8 @@ require "./ui/turn_presenter"
 require "./ui/cancellation"
 require "./ui/editor"
 require "./ui/prompt"
+require "./ui/clipboard"
+require "./ui/input_reader"
 require "./commands/router"
 require "./skills"
 require "./tools/policy"
@@ -219,7 +221,8 @@ module Nightmare
         stdout: @stdout,
         skills_manager: @skills_manager,
         allowlist: @allowlist,
-        tool_policy: @tool_policy
+        tool_policy: @tool_policy,
+        turn_presenter: @turn_presenter
       )
       @router.on_exit = -> { @running = false }
     end
@@ -237,12 +240,42 @@ module Nightmare
         end
         prompt_str = UI::Prompt.render(
           cwd: cwd,
-          active_skill_name: @skills_manager.active_skill.try(&.name)
+          active_skill_name: @skills_manager.active_skill.try(&.name),
+          pending_image_count: @router.pending_images.size
         )
         @stdout.print "#{prompt_str}#{Salamander::UI::Theme.user_prompt}"
         @stdout.flush
 
-        line = @stdin.gets
+        line = UI::InputReader.read_line(
+          stdin: @stdin,
+          stdout: @stdout,
+          on_clipboard_paste: -> {
+            if img = UI::Clipboard.capture_image
+              @router.pending_images << img
+              sz = UI::Clipboard.format_bytes(img.size_bytes)
+              "[Image ##{@router.pending_images.size}: #{img.label} #{img.mime}, #{sz}]"
+            else
+              nil
+            end
+          },
+          on_file_paste: ->(pasted : String) {
+            clean = UI::Clipboard.normalize_pasted_path(pasted)
+            if UI::Clipboard.image_path?(clean)
+              begin
+                img = UI::Clipboard.load_file(clean, @guard)
+                @router.pending_images << img
+                sz = UI::Clipboard.format_bytes(img.size_bytes)
+                "[Image ##{@router.pending_images.size}: #{img.label}, #{sz}]"
+              rescue
+                nil
+              end
+            else
+              nil
+            end
+          },
+          on_text_paste: -> { UI::Clipboard.capture_text },
+          on_interrupt: -> { @cancellation.handle_sigint }
+        )
         @stdout.print Salamander::UI::Theme::RESET
         @stdout.flush
         if line.nil?
@@ -255,7 +288,13 @@ module Nightmare
         end
 
         trimmed = line.strip
-        next if trimmed.empty?
+        if trimmed.empty?
+          if @router.pending_images.empty?
+            next
+          else
+            trimmed = "[Attached image(s)]"
+          end
+        end
 
         if @router.slash_command?(trimmed)
           handled, payload = @router.handle(trimmed)
@@ -281,11 +320,20 @@ module Nightmare
       side_effects = [] of String
       @registry.set_active_side_effects(side_effects)
 
+      cleaned_input, inline_imgs = UI::Clipboard.extract_inline_images(user_input, @guard)
+      inline_imgs.each do |img|
+        @stdout.puts " ↳ Attached [Image: #{img.label} (#{img.mime}, #{UI::Clipboard.format_bytes(img.size_bytes)})]".colorize(:dark_gray)
+      end
+
+      turn_images = @router.pending_images.dup + inline_imgs
+      @router.pending_images.clear
+      img_b64s = turn_images.empty? ? nil : turn_images.map(&.base64)
+
       # Start turn in context store
       prev_resp = @store.history.last?.try(&.last_assistant_text)
-      @turn_presenter.reset_for_new_turn(user_input, prev_resp)
+      @turn_presenter.reset_for_new_turn(cleaned_input, prev_resp)
       @turn_presenter.active_skill_name = @skills_manager.active_skill.try(&.name)
-      user_msg = Mantle::Message.new("user", user_input)
+      user_msg = Mantle::Message.new("user", cleaned_input, images: img_b64s)
       @store.start_turn(user_msg)
 
       pinned_block = @pinned_files.render_pinned_block(@guard)
@@ -358,9 +406,12 @@ module Nightmare
         # Calibrate tokens
         if prompt_tok = outcome.prompt_tokens
           assembled = @store.assemble_messages(@router.current_prompt, pinned_block, skill_block)
-          total_chars = assembled.sum { |m| m.content.try(&.size) || 0 }
-          @calibrator.calibrate!(total_chars, prompt_tok)
-          @calibrator.save(@env.workspace_cache_dir) if @env.ensure_dirs? && !@no_log
+          has_images = assembled.any? { |m| m.images.try { |imgs| !imgs.empty? } || false }
+          unless has_images
+            total_chars = assembled.sum { |m| m.content.try(&.size) || 0 }
+            @calibrator.calibrate!(total_chars, prompt_tok)
+            @calibrator.save(@env.workspace_cache_dir) if @env.ensure_dirs? && !@no_log
+          end
         end
       else
         err = outcome.error.not_nil!

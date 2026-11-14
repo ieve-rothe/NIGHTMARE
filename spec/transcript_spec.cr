@@ -95,4 +95,20 @@ describe Nightmare::Transcript do
       end
     end
   end
+
+  describe "multimodal image metadata rendering" do
+    it "records attached image count summary in transcript markdown without dumping base64" do
+      with_temp_dir do |dir|
+        transcript = Nightmare::Transcript.new(dir)
+        secret_b64 = "VERY_LONG_BASE64_IMAGE_BLOB_DATA"
+        transcript.record(Mantle::Message.new("user", "Inspect these captures", images: [secret_b64, secret_b64]))
+
+        disk_path = File.join(dir, "transcript.md")
+        md = File.read(disk_path)
+        md.should contain("Inspect these captures")
+        md.should contain("*(Attached images: 2)*")
+        md.should_not contain(secret_b64)
+      end
+    end
+  end
 end

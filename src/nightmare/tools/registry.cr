@@ -128,7 +128,7 @@ module Nightmare::Tools
       schema = Mantle::Tools::ParametersSchema.new(props, ["path"])
       func = Mantle::Tools::FunctionDefinition.new(
         "read_file",
-        "Reads file contents safely with optional line offset and limit. Returns file contents with '<line> | ' prefixes for line referencing. Use these line numbers with replace_in_file's 'start_line' and 'end_line'. DO NOT read files to 'learn the system' or 'understand the workflow'; if you need architectural research, use spawn_subagent with a targeted question.",
+        "Reads file contents safely with optional line offset and limit. Returns file contents with '<line> | ' prefixes for line referencing. Use these line numbers with replace_in_file's 'start_line' and 'end_line'. Also supports image files (.png, .jpg, .jpeg, .webp, .gif), loading them into visual context. DO NOT read files to 'learn the system' or 'understand the workflow'; if you need architectural research, use spawn_subagent with a targeted question.",
         schema
       )
 

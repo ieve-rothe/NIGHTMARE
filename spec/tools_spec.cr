@@ -1000,4 +1000,74 @@ PY
       end
     end
   end
+
+  describe "multimodal image inspection in read_file" do
+    it "detects PNG/JPEG images, enforces MAX_IMAGE_BYTES, and returns image_loaded JSON with base64" do
+      with_temp_dir do |root|
+        env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+        guard = Nightmare::Tools::Guard.new(env)
+        tools = Nightmare::Tools::ReadOnly.new(guard)
+
+        png_bytes = Bytes[0x89_u8, 0x50_u8, 0x4E_u8, 0x47_u8, 0x0D_u8, 0x0A_u8, 0x1A_u8, 0x0A_u8, 0x00_u8, 0x01_u8]
+        png_path = File.join(root, "diagram.png")
+        File.write(png_path, png_bytes)
+
+        result = tools.read_file("diagram.png")
+        parsed = JSON.parse(result)
+        parsed["status"].as_s.should eq("image_loaded")
+        parsed["path"].as_s.should eq("diagram.png")
+        parsed["mime"].as_s.should eq("image/png")
+        parsed["size_bytes"].as_i64.should eq(png_bytes.size.to_i64)
+        parsed["images"].as_a.map(&.as_s).should eq([Base64.strict_encode(png_bytes)])
+
+        jpg_bytes = Bytes[0xFF_u8, 0xD8_u8, 0xFF_u8, 0xE0_u8]
+        File.write(File.join(root, "photo.jpeg"), jpg_bytes)
+        jpg_parsed = JSON.parse(tools.read_file("photo.jpeg"))
+        jpg_parsed["status"].as_s.should eq("image_loaded")
+        jpg_parsed["mime"].as_s.should eq("image/jpeg")
+
+        # Oversized image file returns informative error
+        oversized_path = File.join(root, "huge.png")
+        File.open(oversized_path, "wb") do |f|
+          f.truncate((Nightmare::Config::MAX_IMAGE_BYTES + 1).to_i64)
+        end
+        err_result = tools.read_file("huge.png")
+        err_result.should contain("exceeds maximum image size")
+      end
+    end
+
+    it "automatically downscales and compresses large screenshots in ReadOnly#read_file and Clipboard" do
+      if exe = Mantle::Support::Image.magick_executable
+        with_temp_dir do |root|
+          env = Nightmare::Workspace::Environment.new(root, ensure_dirs: false)
+          guard = Nightmare::Tools::Guard.new(env)
+          tools = Nightmare::Tools::ReadOnly.new(guard)
+
+          large_png_path = File.join(root, "screenshot_4k.png")
+          status = Process.run(
+            exe,
+            ["-size", "2000x1200", "-depth", "8", "gradient:teal-purple", "-define", "png:compression-level=0", large_png_path],
+            output: IO::Memory.new,
+            error: IO::Memory.new
+          )
+          status.success?.should be_true
+          raw_size = File.size(large_png_path)
+          raw_size.should be > Mantle::Support::Image::DEFAULT_OPTIMIZE_THRESHOLD_BYTES
+
+          # 1. ReadOnly#read_file compresses to image/jpeg
+          read_json = JSON.parse(tools.read_file("screenshot_4k.png"))
+          read_json["status"].as_s.should eq("image_loaded")
+          read_json["mime"].as_s.should eq("image/jpeg")
+          read_json["size_bytes"].as_i64.should be < raw_size
+
+          # 2. Clipboard.load_file compresses to image/jpeg
+          pending = Nightmare::UI::Clipboard.load_file("screenshot_4k.png", guard)
+          pending.label.should eq("screenshot_4k.png")
+          pending.mime.should eq("image/jpeg")
+          pending.size_bytes.should be < raw_size
+          Base64.decode(pending.base64).size.to_i64.should eq(pending.size_bytes)
+        end
+      end
+    end
+  end
 end

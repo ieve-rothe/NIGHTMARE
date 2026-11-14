@@ -27,7 +27,8 @@ module Nightmare::UI
     def render(
       cwd : String = Dir.current,
       active_skill_name : String? = nil,
-      home : String = Path.home.to_s
+      home : String = Path.home.to_s,
+      pending_image_count : Int32 = 0
     ) : String
       display_path = format_path(cwd, home)
       theme = Salamander::UI::Theme
@@ -44,7 +45,13 @@ module Nightmare::UI
                         ""
                       end
 
-      header = "#{glyph_icon} #{pairing_label} #{dot} #{path_segment}#{skill_segment}"
+      image_segment = if pending_image_count > 0
+                        " #{theme.status_tag}[🖼 ×#{pending_image_count}]#{reset}"
+                      else
+                        ""
+                      end
+
+      header = "#{glyph_icon} #{pairing_label} #{dot} #{path_segment}#{skill_segment}#{image_segment}"
       lead = "#{theme.status_tag}You#{reset} #{theme.prompt_glyph}"
 
       "#{header}\n#{lead}"

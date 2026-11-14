@@ -63,5 +63,13 @@ describe Nightmare::UI::Prompt do
       lines.size.should eq(2)
       lines[0].should contain("[deploy-runner]")
     end
+
+    it "shows staged image badge in pairing header when pending_image_count > 0" do
+      res_zero = Nightmare::UI::Prompt.render(cwd: "/tmp", pending_image_count: 0)
+      res_zero.should_not contain("[🖼")
+
+      res_two = Nightmare::UI::Prompt.render(cwd: "/tmp", pending_image_count: 2)
+      res_two.should contain("[🖼 ×2]")
+    end
   end
 end

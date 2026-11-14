@@ -467,5 +467,111 @@ describe Nightmare::UI::TurnPresenter do
       idx_sep3.should be < idx3
     end
   end
+
+  it "presents image_loaded read_file tool results cleanly without counting base64 as text lines" do
+    calibrator = Nightmare::Context::TokenEstimator.new(divisor: 4.0)
+    io = IO::Memory.new
+    presenter = Nightmare::UI::TurnPresenter.new(
+      calibrator: calibrator,
+      max_width: 100,
+      output: io
+    )
+    presenter.reset_for_new_turn("Inspect shot.png")
+
+    img_payload = {
+      "status"     => "image_loaded",
+      "path"       => "shot.png",
+      "mime"       => "image/png",
+      "size_bytes" => 2048,
+      "images"     => ["AAAA"],
+    }.to_json
+
+    args = JSON.parse(%({"path":"shot.png"})).as_h
+    presenter.present_tool_result("read_file", args, img_payload)
+
+    presenter.opened_files.size.should eq(1)
+    opened = presenter.opened_files.first
+    opened.path.should eq("shot.png")
+    opened.lines.should eq(1)
+    opened.tokens.should eq(Mantle::Storage::Shedder::IMAGE_TOKEN_ESTIMATE)
+    opened.read_range.should eq("image (image/png)")
+
+    rendered = Salamander::UI::Panel.strip_ansi(io.to_s)
+    rendered.should contain("[READ: IMAGE]")
+    rendered.should contain("shot.png")
+    rendered.should contain("image/png")
+  end
+
+  it "resets turn_number and right-pane history on /clear and clears last_render on /cls" do
+    with_temp_dir do |dir|
+      calibrator = Nightmare::Context::TokenEstimator.new
+      io = IO::Memory.new
+      presenter = Nightmare::UI::TurnPresenter.new(
+        calibrator: calibrator,
+        max_width: 105,
+        output: io
+      )
+      presenter.split_mode_override = true
+
+      env = Nightmare::Workspace::Environment.new(root_path: dir, ensure_dirs: false)
+      store = Nightmare::Context::SlidingStore.new
+      router = Nightmare::Commands::Router.new(
+        store: store,
+        pinned_files: Nightmare::Context::PinnedFiles.new,
+        calibrator: calibrator,
+        guard: Nightmare::Tools::Guard.new(env),
+        env: env,
+        transcript: Nightmare::Transcript.new(dir, enabled: false),
+        current_prompt: "Test",
+        current_model: "test-model",
+        stdout: io,
+        turn_presenter: presenter
+      )
+
+      with_env({"LINES" => "40", "COLUMNS" => "180"}) do
+        # Run 2 turns
+        presenter.reset_for_new_turn("first prompt")
+        presenter.append_stream_text("First turn text")
+        presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: "First turn text")
+
+        presenter.reset_for_new_turn("second prompt", "First turn text")
+        presenter.append_stream_text("Second turn text")
+        presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: "Second turn text")
+
+        presenter.turn_number.should eq(2)
+        presenter.stream_history.should_not be_empty
+        presenter.last_render.should_not be_nil
+
+        # /cls resets last_render only
+        handled_cls, _ = router.handle("/cls")
+        handled_cls.should be_true
+        presenter.last_render.should be_nil
+        presenter.turn_number.should eq(2)
+        presenter.stream_history.should_not be_empty
+
+        # /clear resets turn_number and clears right-pane history & cards
+        handled_clear, _ = router.handle("/clear")
+        handled_clear.should be_true
+        presenter.turn_number.should eq(0)
+        presenter.stream_history.should be_empty
+        presenter.stream_current.should eq("")
+        presenter.last_render.should be_nil
+        presenter.last_agent_response.should be_nil
+
+        # Next turn starts cleanly as TURN 1 with no stale history or Turn divider
+        presenter.reset_for_new_turn("fresh prompt")
+        presenter.append_stream_text("Fresh turn text")
+        presenter.render_dashboard(action_label: "Turn Complete", format_right_pane: true, final_response: "Fresh turn text")
+
+        clean = Salamander::UI::Panel.strip_ansi(presenter.last_render.not_nil!)
+        clean.should contain("NIGHTMARE REPL · TURN 1")
+        clean.should_not contain("NIGHTMARE REPL · TURN 3")
+        clean.should contain("Fresh turn text")
+        clean.should_not contain("First turn text")
+        clean.should_not contain("Second turn text")
+        clean.should_not contain("─── Turn")
+      end
+    end
+  end
 end
 

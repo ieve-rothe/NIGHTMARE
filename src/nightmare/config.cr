@@ -62,5 +62,7 @@ module Nightmare
     MAX_DASHBOARD_WIDTH = 105
     MAX_MULTILINE_LINES = 2000
     MAX_MULTILINE_CHARS = 200_000
+    MAX_IMAGE_BYTES = 10_485_760
+    IMAGE_EXTENSIONS = Set{".png", ".jpg", ".jpeg", ".webp", ".gif"}
   end
 end

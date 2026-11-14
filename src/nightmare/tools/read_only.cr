@@ -4,7 +4,9 @@
 
 require "path"
 require "json"
+require "base64"
 require "file_utils"
+require "mantle"
 require "../config"
 require "./guard"
 
@@ -14,6 +16,10 @@ module Nightmare::Tools
     property pinned_files : Context::PinnedFiles?
 
     def initialize(@guard : Guard, @pinned_files : Context::PinnedFiles? = nil)
+    end
+
+    def self.image_mime_for_path(path : String) : String?
+      Mantle::Support::Image.mime_for_path(path)
     end
 
     # Lists files in the workspace with glob filtering and adaptive depth collapsing, excluding git/nightmare/sensitive files
@@ -198,6 +204,23 @@ module Nightmare::Tools
 
       unless File.exists?(full_path)
         return {error: "File not found: #{path}"}.to_json
+      end
+
+      if mime = ReadOnly.image_mime_for_path(full_path)
+        file_bytes = File.size(full_path)
+        if file_bytes > Config::MAX_IMAGE_BYTES
+          return "[Refused: Image '#{rel_path}' (#{file_bytes} bytes) exceeds maximum image size of #{Config::MAX_IMAGE_BYTES} bytes.]"
+        end
+        raw_slice = File.read(full_path).to_slice
+        detected_mime = Mantle::Support::Image.detect_mime(raw_slice, full_path) || mime
+        b64, final_mime, final_size = Mantle::Support::Image.encode_base64(raw_slice, detected_mime)
+        return {
+          status:     "image_loaded",
+          path:       rel_path,
+          mime:       final_mime,
+          size_bytes: final_size,
+          images:     [b64],
+        }.to_json
       end
 
       settings = @guard.env.settings
