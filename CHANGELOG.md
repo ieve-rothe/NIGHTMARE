@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
 ### Added
 - **End-to-End Multimodal Image Support & Terminal Capture (TKT-040)**: Added `Ctrl+V` raw-mode clipboard image capture (`wl-paste` / `xclip`) and bracketed-paste file attachment in `InputReader`, `/clip` and `/img` slash commands, inline `@path/to/image.png` extraction, `[🖼 ×N]` prompt indicator, `ReadOnly#read_file` image loading, `TurnPresenter` `[READ: IMAGE]` rendering, and `Transcript` image count summaries.
 - **Inline Image Downscaling & Compression (TKT-041)**: Wired `Mantle::Support::Image` into `Nightmare::UI::Clipboard` and `Nightmare::Tools::ReadOnly#read_file` to automatically downscale oversized screenshots (`<= 1920px` longest edge) and compress to `image/jpeg` in-memory via `magick` before base64 encoding.
